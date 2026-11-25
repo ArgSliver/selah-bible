@@ -398,6 +398,10 @@ class MainActivity : ComponentActivity() {
                 }
                 val parts = mutableListOf<String>()
                 summaries.values.forEach { (tr, added, upgraded) ->
+                    val cov = db.getBookCoverage(tr.id)
+                    val full = cov.count { it.isComplete }
+                    val partial = cov.count { it.isPartial }
+                    val missing = cov.count { it.isMissing }
                     val delta = buildString {
                         if (added > 0) append("+$added new")
                         if (upgraded > 0) {
@@ -406,7 +410,12 @@ class MainActivity : ComponentActivity() {
                         }
                         if (isEmpty()) append("already up to date")
                     }
-                    parts.add("${tr.code}: ${tr.bookCount}/66 books, ${tr.verseCount} verses ($delta)")
+                    val covSummary = buildString {
+                        append("$full/66 full")
+                        if (partial > 0) append(", $partial partial")
+                        if (missing > 0) append(", $missing missing")
+                    }
+                    parts.add("${tr.code}: $covSummary • ${tr.verseCount} verses ($delta)")
                 }
                 if (errors.isNotEmpty()) {
                     parts.add("Issues: ${errors.joinToString("; ")}")
@@ -539,7 +548,9 @@ class MainActivity : ComponentActivity() {
                         val favsInCh = db.getFavoriteVersesInChapter(readerBookId, readerChapter)
                         val hlInCh = db.getChapterHighlights(readerBookId, readerChapter)
                         val notesInCh = db.getChapterNotes(readerBookId, readerChapter)
-                        val availBooks = db.getAvailableBookIds(settings.activeTranslationId)
+                        val coverage = db.getBookCoverage(settings.activeTranslationId)
+                        val bookChapterCounts = coverage.associate { it.book.id to it.chaptersLoaded }
+                        val availBooks = coverage.filter { it.chaptersLoaded > 0 }.map { it.book.id }.toSet()
                         val chKey = "$readerBookId:$readerChapter"
 
                         ReaderScreen(
@@ -551,6 +562,7 @@ class MainActivity : ComponentActivity() {
                             highlightsInChapter = hlInCh,
                             notesInChapter = notesInCh,
                             availableBookIds = availBooks,
+                            bookChapterCounts = bookChapterCounts,
                             availableChaptersForBook = { b -> db.getAvailableChaptersForBook(settings.activeTranslationId, b) },
                             translations = translations,
                             settings = settings,

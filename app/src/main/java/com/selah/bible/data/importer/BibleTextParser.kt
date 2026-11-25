@@ -26,6 +26,10 @@ class BibleTextParser(private val translationId: String) {
     private var expectingImplicitVerseOne: Boolean = false
     private var lastLineWasExplicitRef: Boolean = false
     private var sawMarkedVersesInCurrentBook: Boolean = false
+    // Tracks speculative standalone chapter advances so a stray PDF page number ("2" during Genesis 1:25)
+    // automatically reverts if the very next line continues with verse 26!
+    private var tentativeChapterFrom: Int = 0
+    private var tentativeVerseFrom: Int = 0
 
     // Keyed by packed (bookId, chapter, verse)
     private val verseMap = LinkedHashMap<Long, BibleVerse>(32000)
@@ -70,6 +74,14 @@ class BibleTextParser(private val translationId: String) {
             "young woman", "young man", "young women of jerusalem", "friends",
             "king solomon", "solomon", "beloved", "lover", "daughters of jerusalem",
             "she", "he", "others", "chorus", "the bride", "the bridegroom", "the woman", "the man"
+        )
+
+        private val bareCrossRefAbbrevs = setOf(
+            "Gen", "Exod", "Lev", "Num", "Deut", "Josh", "Judg", "Neh", "Esth",
+            "Ps", "Psa", "Prov", "Eccl", "Isa", "Jer", "Lam", "Ezek", "Hos",
+            "Obad", "Mic", "Nah", "Hab", "Zeph", "Hag", "Zech", "Mal",
+            "Matt", "Rom", "Gal", "Eph", "Phil", "Col", "Thess", "Tim", "Phlm",
+            "Heb", "Jas", "Pet", "Rev"
         )
 
         fun inferTranslationMeta(fileName: String): Triple<String, String, String> {
@@ -203,9 +215,21 @@ class BibleTextParser(private val translationId: String) {
 
         // 2. Book heading line (up to 115 chars; also handles HTML headings with subtitles like "Ruth: A Story...")
         if (line.length <= 115 && !line.contains('⟦')) {
-            val bookOnly = BibleCanon.findByName(line) ?: if (isHtmlHeading) {
-                val beforeSub = line.substringBefore(':').substringBefore('—').substringBefore('–').trim()
-                if (beforeSub.length in 3..60) BibleCanon.findByName(beforeSub) else null
+            val startsLikeTitle = line.first().isUpperCase() || line.first().isDigit()
+            val endsWithSentencePunct = line.endsWith('.') || line.endsWith(',') || line.endsWith(';') ||
+                line.endsWith('?') || line.endsWith('!') || line.endsWith('”') || line.endsWith('"')
+            val midSentenceContinuation = !isHtmlHeading && currentVerse > 0 && currentText.isNotEmpty() && run {
+                val lastCh = currentText.trimEnd().lastOrNull()
+                lastCh != null && lastCh !in ".!?:”\"'’)"
+            }
+
+            val bookOnly = if (isHtmlHeading || (startsLikeTitle && !endsWithSentencePunct && !midSentenceContinuation)) {
+                BibleCanon.findByFullBookTitle(line) ?: if (isHtmlHeading) {
+                    val beforeSub = line.substringBefore(':').substringBefore('—').substringBefore('–').trim()
+                    if (beforeSub.length in 3..60) BibleCanon.findByFullBookTitle(beforeSub) else null
+                } else {
+                    null
+                }
             } else {
                 null
             }
@@ -221,32 +245,44 @@ class BibleTextParser(private val translationId: String) {
                 currentVerse = 0
                 expectingImplicitVerseOne = (bookOnly.chapters == 1)
                 lastLineWasExplicitRef = false
+                tentativeChapterFrom = 0
+                tentativeVerseFrom = 0
                 return
             }
 
             // "Book Chapter" heading (e.g. "Ruth 1", "Song of Songs 2", "Amos 5", "Mark 1 — The Beginning")
-            bookAndChapterRegex.matchEntire(line)?.let { m ->
-                val book = BibleCanon.findByName(m.groupValues[1])
-                val ch = BibleCanon.parseChapterNumber(m.groupValues[2])
-                if (book != null && ch != null && ch in 1..book.chapters) {
-                    // Guard against PDF running page headers repeating the current chapter
-                    if (!isHtmlHeading && currentBook?.id == book.id && currentChapter == ch && currentVerse > 0) {
+            if (startsLikeTitle && !midSentenceContinuation) {
+                bookAndChapterRegex.matchEntire(line)?.let { m ->
+                    val rawBookPart = m.groupValues[1].trim()
+                    val rawNumPart = m.groupValues[2].trim()
+                    val hasChapterWord = line.contains("chapter", ignoreCase = true)
+                    // Never allow lowercase or bare "I" Roman numeral without "chapter" (prevents "Am I" / "He I" hijacks!)
+                    val validNumToken = rawNumPart.all { it.isDigit() } ||
+                        (rawNumPart == rawNumPart.uppercase() && (hasChapterWord || rawNumPart.length >= 2))
+                    val book = if (validNumToken) BibleCanon.findByFullBookTitle(rawBookPart) else null
+                    val ch = if (book != null) BibleCanon.parseChapterNumber(rawNumPart) else null
+                    if (book != null && ch != null && ch in 1..book.chapters) {
+                        // Guard against PDF running page headers repeating the current chapter
+                        if (!isHtmlHeading && currentBook?.id == book.id && currentChapter == ch && currentVerse > 0) {
+                            return
+                        }
+                        // Guard against Study Bible intro bullet lines quoting another book's chapter (e.g. "Judges 17")
+                        if (!isHtmlHeading && currentBook != null && currentChapter == 0 &&
+                            book.id != currentBook!!.id && book.id != currentBook!!.id + 1
+                        ) {
+                            return
+                        }
+                        flushCurrentVerse()
+                        if (book.id != currentBook?.id) sawMarkedVersesInCurrentBook = false
+                        currentBook = book
+                        currentChapter = ch
+                        currentVerse = 0
+                        expectingImplicitVerseOne = true
+                        lastLineWasExplicitRef = false
+                        tentativeChapterFrom = 0
+                        tentativeVerseFrom = 0
                         return
                     }
-                    // Guard against Study Bible intro bullet lines quoting another book's chapter (e.g. "Judges 17")
-                    if (!isHtmlHeading && currentBook != null && currentChapter == 0 &&
-                        book.id != currentBook!!.id && book.id != currentBook!!.id + 1
-                    ) {
-                        return
-                    }
-                    flushCurrentVerse()
-                    if (book.id != currentBook?.id) sawMarkedVersesInCurrentBook = false
-                    currentBook = book
-                    currentChapter = ch
-                    currentVerse = 0
-                    expectingImplicitVerseOne = true
-                    lastLineWasExplicitRef = false
-                    return
                 }
             }
 
@@ -271,6 +307,8 @@ class BibleTextParser(private val translationId: String) {
                 currentVerse = 0
                 expectingImplicitVerseOne = true
                 lastLineWasExplicitRef = false
+                tentativeChapterFrom = 0
+                tentativeVerseFrom = 0
                 return
             }
         }
@@ -280,7 +318,11 @@ class BibleTextParser(private val translationId: String) {
             val num = m.groupValues[1].toIntOrNull()
             if (num != null && num in 1..activeBook.chapters) {
                 if (currentChapter == 0 || num == currentChapter + 1) {
+                    val prevCh = currentChapter
+                    val prevV = currentVerse
                     flushCurrentVerse()
+                    tentativeChapterFrom = if (prevCh > 0 && prevV > 0) prevCh else 0
+                    tentativeVerseFrom = if (prevCh > 0 && prevV > 0) prevV else 0
                     currentChapter = num
                     currentVerse = 0
                     expectingImplicitVerseOne = true
@@ -306,6 +348,8 @@ class BibleTextParser(private val translationId: String) {
                 currentVerse = v
                 expectingImplicitVerseOne = false
                 lastLineWasExplicitRef = false
+                tentativeChapterFrom = 0
+                tentativeVerseFrom = 0
                 return
             }
         }
@@ -335,6 +379,8 @@ class BibleTextParser(private val translationId: String) {
                         currentVerse = v
                         expectingImplicitVerseOne = false
                         lastLineWasExplicitRef = false
+                        tentativeChapterFrom = 0
+                        tentativeVerseFrom = 0
                         appendToCurrent(body)
                     }
                 }
@@ -354,6 +400,8 @@ class BibleTextParser(private val translationId: String) {
                     currentVerse = v
                     expectingImplicitVerseOne = false
                     lastLineWasExplicitRef = false
+                    tentativeChapterFrom = 0
+                    tentativeVerseFrom = 0
                     feedVerseSegments(body)
                     return
                 }
@@ -363,6 +411,8 @@ class BibleTextParser(private val translationId: String) {
         // 7. Explicit superscript/span verse markers injected by EPUB parser: ⟦1⟧ text ⟦2⟧ text
         if (line.contains('⟦')) {
             lastLineWasExplicitRef = false
+            tentativeChapterFrom = 0
+            tentativeVerseFrom = 0
             feedMarkedParagraph(line)
             return
         }
@@ -370,22 +420,59 @@ class BibleTextParser(private val translationId: String) {
         // Skip HTML section subheadings inside chapters (e.g. <h3>Jesus Calms the Storm</h3>)
         if (isHtmlHeading) return
 
-        // 8. Leading verse number ("1 In the beginning..." or "16. For God so loved...")
+        // 8. Leading verse number ("1 In the beginning...", "16. For God...", or PDF drop-cap "12 Rehoboam went...")
         leadingVerseRegex.matchEntire(line)?.let { m ->
             val v = m.groupValues[1].toIntOrNull()
             val body = m.groupValues[2].trim()
-            if (v != null && isPlausibleVerseNumber(v, activeBook)) {
-                if (currentChapter == 0) {
-                    currentChapter = 1
-                } else if (v == 1 && currentVerse > 1 && currentChapter < activeBook.chapters) {
-                    currentChapter += 1
+            if (v != null && !isStudyNoteOrCrossRef(body)) {
+                // Revert a speculative standalone page number if this line continues the previous chapter's verses!
+                if (currentVerse == 0 && tentativeChapterFrom > 0 &&
+                    v in (tentativeVerseFrom + 1)..(tentativeVerseFrom + 3)
+                ) {
+                    currentChapter = tentativeChapterFrom
+                    currentVerse = v
+                    tentativeChapterFrom = 0
+                    tentativeVerseFrom = 0
+                    expectingImplicitVerseOne = false
+                    lastLineWasExplicitRef = false
+                    feedVerseSegments(body)
+                    return
                 }
-                flushCurrentVerse()
-                currentVerse = v
-                expectingImplicitVerseOne = false
-                lastLineWasExplicitRef = false
-                feedVerseSegments(body)
-                return
+
+                // Detect PDF drop-cap chapter rollover on the same line as Verse 1:
+                // e.g. at end of 1 Kings 11:43, seeing "12 Rehoboam went to Shechem..." or "12Rehoboam..."
+                val isLeadingChapterDropCap = v in 2..activeBook.chapters &&
+                    v == currentChapter + 1 &&
+                    (currentVerse == 0 || v < currentVerse || v > currentVerse + 3) &&
+                    body.length >= 10 && body.any { it.isLowerCase() }
+
+                if (isLeadingChapterDropCap) {
+                    flushCurrentVerse()
+                    currentChapter = v
+                    currentVerse = 1
+                    expectingImplicitVerseOne = false
+                    lastLineWasExplicitRef = false
+                    tentativeChapterFrom = 0
+                    tentativeVerseFrom = 0
+                    feedVerseSegments(body)
+                    return
+                }
+
+                if (isPlausibleVerseNumber(v, activeBook)) {
+                    if (currentChapter == 0) {
+                        currentChapter = 1
+                    } else if (v == 1 && currentVerse > 1 && currentChapter < activeBook.chapters) {
+                        currentChapter += 1
+                    }
+                    flushCurrentVerse()
+                    currentVerse = v
+                    expectingImplicitVerseOne = false
+                    lastLineWasExplicitRef = false
+                    tentativeChapterFrom = 0
+                    tentativeVerseFrom = 0
+                    feedVerseSegments(body)
+                    return
+                }
             }
         }
 
@@ -395,6 +482,8 @@ class BibleTextParser(private val translationId: String) {
                 currentVerse = 1
                 expectingImplicitVerseOne = false
                 lastLineWasExplicitRef = false
+                tentativeChapterFrom = 0
+                tentativeVerseFrom = 0
                 feedVerseSegments(line)
                 return
             }
@@ -417,14 +506,19 @@ class BibleTextParser(private val translationId: String) {
     /**
      * Filters out Study Bible commentary notes and cross-reference footnotes
      * (e.g. "Ps 32:10;", "Josh", "Hos", "Isa", "(69:16; 86:17; see 18:6)", "Ps 24 The shepherd of Ps 23...").
+     *
+     * Note: Never flags short English words ("He", "to", "in", "Dan", "son.") on normal continuation lines.
      */
-    internal fun isStudyNoteOrCrossRef(raw: String): Boolean {
+    internal fun isStudyNoteOrCrossRef(raw: String, allowSingleWordAbbrev: Boolean = false): Boolean {
         val text = raw.trim()
-        if (text.length < 3) return true
+        if (text.isEmpty()) return false
 
-        // Single bare book name or abbreviation ("Josh", "Hos", "Isa", "Ps")
-        if (text.length <= 20 && !text.contains(' ') && BibleCanon.findByName(text.trimEnd('.', ';', ',')) != null) {
-            return true
+        // Bare abbreviated book citation as an entire verse/segment ("Josh", "Hos", "Isa", "Ps", "Exod", "Deut")
+        if (allowSingleWordAbbrev && text.length <= 12 && !text.contains(' ')) {
+            val bare = text.trimEnd('.', ';', ',')
+            if (bare in bareCrossRefAbbrevs) {
+                return true
+            }
         }
 
         // Pure cross-reference line like "Ps 32:10;" or "Ps 26:1-2; 39:1;" or "1 Cor 12:4"
@@ -482,7 +576,7 @@ class BibleTextParser(private val translationId: String) {
         }
 
         val beforeFirst = line.substring(0, matches.first().range.first).trim()
-        if (beforeFirst.isNotEmpty() && !isStudyNoteOrCrossRef(beforeFirst)) {
+        if (beforeFirst.isNotEmpty() && !isStudyNoteOrCrossRef(beforeFirst, allowSingleWordAbbrev = false)) {
             if (currentVerse > 0) {
                 appendToCurrent(beforeFirst)
             } else if (expectingImplicitVerseOne && beforeFirst.length >= 10) {
@@ -505,7 +599,7 @@ class BibleTextParser(private val translationId: String) {
             val nextMarkerNum = matches.getOrNull(i + 1)?.groupValues?.get(1)?.toIntOrNull()
 
             // Skip cross-reference footnote segments without advancing currentVerse!
-            if (segText.isNotEmpty() && isStudyNoteOrCrossRef(segText)) {
+            if (segText.isNotEmpty() && isStudyNoteOrCrossRef(segText, allowSingleWordAbbrev = true)) {
                 exitVerseForStudyNote()
                 continue
             }
@@ -520,7 +614,7 @@ class BibleTextParser(private val translationId: String) {
                     vNum > currentVerse + 3
                 )) ||
                 (currentChapter == 0 && currentVerse == 0 && vNum >= 2 && (
-                    nextMarkerNum == 2 || (segText.length >= 12 && !isStudyNoteOrCrossRef(segText))
+                    nextMarkerNum == 2 || (segText.length >= 12 && !isStudyNoteOrCrossRef(segText, allowSingleWordAbbrev = true))
                 ))
             )
 
@@ -581,7 +675,7 @@ class BibleTextParser(private val translationId: String) {
     }
 
     private fun feedVerseSegments(text: String) {
-        if (isStudyNoteOrCrossRef(text)) {
+        if (isStudyNoteOrCrossRef(text, allowSingleWordAbbrev = false)) {
             exitVerseForStudyNote()
             return
         }
@@ -625,7 +719,7 @@ class BibleTextParser(private val translationId: String) {
         val book = currentBook ?: return
         if (currentChapter in 1..book.chapters && currentVerse in 1..176 && currentText.isNotEmpty()) {
             val body = cleanVerseBody(currentText.toString())
-            if (body.length >= 4 && !isStudyNoteOrCrossRef(body)) {
+            if (body.length >= 4 && !isStudyNoteOrCrossRef(body, allowSingleWordAbbrev = true)) {
                 val key = (book.id.toLong() shl 20) or (currentChapter.toLong() shl 10) or currentVerse.toLong()
                 val existing = verseMap[key]
                 if (existing == null || (existing.text.length < 20 && body.length > existing.text.length)) {

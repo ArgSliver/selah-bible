@@ -283,61 +283,93 @@ object BibleCanon {
         map
     }
 
+    // Strict lookup for standalone book headings & "Book Chapter" headers:
+    // excludes 2-4 letter abbreviations (he, is, am, son, dan, re, act, mat, etc.)
+    // so wrapped English words mid-chapter never hijack the current book.
+    private val fullTitleLookup: Map<String, BibleBook> by lazy {
+        val shortAbbrevTail = setOf("sam", "kgs", "chr", "chron", "cor", "thess", "thes", "tim", "pet", "sol")
+        val fullSingleAlternates = setOf("psalm", "canticles", "revelations", "apocalypse")
+        val map = HashMap<String, BibleBook>(512)
+        for (book in books) {
+            map[normalize(book.name)] = book
+            map[normalize("the ${book.name}")] = book
+            map[normalize("the book of ${book.name}")] = book
+            map[normalize("book of ${book.name}")] = book
+            for (alias in book.aliases) {
+                val n = normalize(alias)
+                if (n in fullSingleAlternates) {
+                    map[n] = book
+                } else if (' ' in n) {
+                    val tail = n.substringAfterLast(' ')
+                    if (tail.length >= 4 && tail !in shortAbbrevTail) {
+                        map[n] = book
+                    }
+                }
+            }
+        }
+        map
+    }
+
+    private val titlePrefixes = listOf(
+        "the book of the prophet ",
+        "book of the prophet ",
+        "the book of ",
+        "book of ",
+        "the gospel according to saint ",
+        "the gospel according to st ",
+        "the gospel according to ",
+        "gospel according to saint ",
+        "gospel according to st ",
+        "gospel according to ",
+        "the gospel of ",
+        "gospel of ",
+        "the general epistle of ",
+        "general epistle of ",
+        "the epistle of paul the apostle to the ",
+        "the epistle of paul the apostle to ",
+        "the epistle of paul to the ",
+        "the epistle of paul to ",
+        "epistle of paul the apostle to the ",
+        "epistle of paul the apostle to ",
+        "epistle of paul to the ",
+        "epistle of paul to ",
+        "the epistle to the ",
+        "epistle to the ",
+        "the letter of paul to the ",
+        "the letter to the ",
+        "letter to the ",
+        "the letter of ",
+        "letter of ",
+        "the "
+    )
+
     fun getById(id: Int): BibleBook = byId[id] ?: books.first()
 
-    fun findByName(raw: String): BibleBook? {
+    fun findByName(raw: String): BibleBook? = lookupIn(raw, normalizedLookup)
+
+    fun findByFullBookTitle(raw: String): BibleBook? = lookupIn(raw, fullTitleLookup)
+
+    private fun lookupIn(raw: String, table: Map<String, BibleBook>): BibleBook? {
         val norm = normalize(raw)
         if (norm.isEmpty()) return null
-        normalizedLookup[norm]?.let { return it }
+        table[norm]?.let { return it }
 
-        // Handle titles with parenthetical alternate names like "Song of Songs (Song of Solomon)" or "Mark — Introduction"
+        // Handle titles with parenthetical alternate names like "Song of Songs (Song of Solomon)"
         if ('(' in raw) {
             val beforeParen = raw.substringBefore('(').trim()
             if (beforeParen.isNotEmpty()) {
-                normalizedLookup[normalize(beforeParen)]?.let { return it }
+                table[normalize(beforeParen)]?.let { return it }
             }
             val insideParen = raw.substringAfter('(').substringBefore(')').trim()
             if (insideParen.isNotEmpty()) {
-                normalizedLookup[normalize(insideParen)]?.let { return it }
+                table[normalize(insideParen)]?.let { return it }
             }
         }
 
-        val prefixes = listOf(
-            "the book of the prophet ",
-            "book of the prophet ",
-            "the book of ",
-            "book of ",
-            "the gospel according to saint ",
-            "the gospel according to st ",
-            "the gospel according to ",
-            "gospel according to saint ",
-            "gospel according to st ",
-            "gospel according to ",
-            "the gospel of ",
-            "gospel of ",
-            "the general epistle of ",
-            "general epistle of ",
-            "the epistle of paul the apostle to the ",
-            "the epistle of paul the apostle to ",
-            "the epistle of paul to the ",
-            "the epistle of paul to ",
-            "epistle of paul the apostle to the ",
-            "epistle of paul the apostle to ",
-            "epistle of paul to the ",
-            "epistle of paul to ",
-            "the epistle to the ",
-            "epistle to the ",
-            "the letter of paul to the ",
-            "the letter to the ",
-            "letter to the ",
-            "the letter of ",
-            "letter of ",
-            "the "
-        )
-        for (p in prefixes) {
+        for (p in titlePrefixes) {
             if (norm.startsWith(p)) {
                 val stripped = norm.removePrefix(p).trim()
-                normalizedLookup[stripped]?.let { return it }
+                table[stripped]?.let { return it }
             }
         }
         return null

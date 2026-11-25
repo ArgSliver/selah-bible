@@ -101,6 +101,7 @@ fun ReaderScreen(
     highlightsInChapter: Map<Int, String>,
     notesInChapter: Map<Int, String>,
     availableBookIds: Set<Int>,
+    bookChapterCounts: Map<Int, Int>,
     availableChaptersForBook: (Int) -> Set<Int>,
     translations: List<Translation>,
     settings: UserSettings,
@@ -508,6 +509,7 @@ fun ReaderScreen(
             currentBookId = bookId,
             currentChapter = chapter,
             availableBookIds = availableBookIds,
+            bookChapterCounts = bookChapterCounts,
             availableChaptersForBook = availableChaptersForBook,
             onDismiss = { showBookPicker = false },
             onSelect = { b, c ->
@@ -969,11 +971,13 @@ private fun BookChapterPickerSheet(
     currentBookId: Int,
     currentChapter: Int,
     availableBookIds: Set<Int>,
+    bookChapterCounts: Map<Int, Int>,
     availableChaptersForBook: (Int) -> Set<Int>,
     onDismiss: () -> Unit,
     onSelect: (bookId: Int, chapter: Int) -> Unit
 ) {
     val palette = LocalSelahPalette.current
+    val partialAmber = Color(0xFFE5A93C)
     var selectedTestament by remember { mutableStateOf(BibleCanon.getById(currentBookId).testament) }
     var pickedBookId by remember { mutableStateOf<Int?>(null) }
 
@@ -1022,7 +1026,10 @@ private fun BookChapterPickerSheet(
                     contentPadding = PaddingValues(bottom = 24.dp)
                 ) {
                     items(books, key = { it.id }) { book ->
-                        val hasContent = book.id in availableBookIds
+                        val loadedChapters = bookChapterCounts[book.id]
+                            ?: if (book.id in availableBookIds) book.chapters else 0
+                        val hasContent = loadedChapters > 0
+                        val isPartial = loadedChapters in 1 until book.chapters
                         val isCurrent = book.id == currentBookId
                         Row(
                             modifier = Modifier
@@ -1043,9 +1050,18 @@ private fun BookChapterPickerSheet(
                                 fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal
                             )
                             Text(
-                                text = "${book.chapters} ch" + if (hasContent) "" else " • import",
-                                color = palette.textSecondary,
-                                fontSize = 12.sp
+                                text = when {
+                                    !hasContent -> "0/${book.chapters} ch • missing"
+                                    isPartial -> "Partial • $loadedChapters/${book.chapters} ch"
+                                    else -> "${book.chapters} ch"
+                                },
+                                color = when {
+                                    isPartial -> partialAmber
+                                    !hasContent -> palette.textSecondary.copy(alpha = 0.65f)
+                                    else -> palette.textSecondary
+                                },
+                                fontSize = 12.sp,
+                                fontWeight = if (isPartial) FontWeight.SemiBold else FontWeight.Normal
                             )
                         }
                     }
@@ -1053,6 +1069,8 @@ private fun BookChapterPickerSheet(
             } else {
                 val book = BibleCanon.getById(pickedBookId!!)
                 val availChapters = remember(book.id) { availableChaptersForBook(book.id) }
+                val loadedCount = availChapters.size
+                val isPartial = loadedCount in 1 until book.chapters
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -1062,12 +1080,28 @@ private fun BookChapterPickerSheet(
                         Icon(Icons.Outlined.ChevronLeft, contentDescription = null, tint = palette.accent)
                         Text("Books", color = palette.accent)
                     }
-                    Text(
-                        text = book.name,
-                        color = palette.textPrimary,
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = book.name,
+                            color = palette.textPrimary,
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = when {
+                                loadedCount == 0 -> "Missing (0/${book.chapters} ch)"
+                                isPartial -> "Partial • $loadedCount/${book.chapters} ch"
+                                else -> "$loadedCount/${book.chapters} ch"
+                            },
+                            color = when {
+                                isPartial -> partialAmber
+                                loadedCount == 0 -> Color(0xFFE07587)
+                                else -> palette.textSecondary
+                            },
+                            fontSize = 11.sp,
+                            fontWeight = if (isPartial) FontWeight.SemiBold else FontWeight.Normal
+                        )
+                    }
                     Spacer(Modifier.width(64.dp))
                 }
                 Spacer(Modifier.height(8.dp))

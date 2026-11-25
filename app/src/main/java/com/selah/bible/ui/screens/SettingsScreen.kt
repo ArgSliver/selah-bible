@@ -66,6 +66,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import com.selah.bible.data.BibleCanon
 import com.selah.bible.data.BookCoverage
 import com.selah.bible.data.CardStyleChoice
 import com.selah.bible.data.CustomFontEntry
@@ -158,6 +159,12 @@ fun SettingsScreen(
 
                 translations.forEach { tr ->
                     val active = tr.id == settings.activeTranslationId
+                    val trCoverage = remember(tr.id, tr.verseCount) { onLoadBookCoverage(tr.id) }
+                    val fullBooks = trCoverage.count { it.isComplete }
+                    val partialBooks = trCoverage.count { it.isPartial }
+                    val missingBooks = trCoverage.count { it.isMissing }
+                    val partialAmber = Color(0xFFE5A93C)
+
                     Surface(
                         onClick = { onSelectTranslation(tr.id) },
                         modifier = Modifier
@@ -180,9 +187,19 @@ fun SettingsScreen(
                                         fontSize = 14.sp,
                                         fontWeight = FontWeight.SemiBold
                                     )
+                                    val statusText = buildString {
+                                        append("$fullBooks/66 full")
+                                        if (partialBooks > 0) append(" • $partialBooks partial")
+                                        if (missingBooks > 0) append(" • $missingBooks missing")
+                                        append(" • ${tr.verseCount} verses")
+                                    }
                                     Text(
-                                        text = "${tr.bookCount}/66 books • ${tr.verseCount} verses",
-                                        color = if (tr.bookCount >= 66) palette.accent else palette.textSecondary,
+                                        text = statusText,
+                                        color = when {
+                                            fullBooks == 66 -> palette.accent
+                                            partialBooks > 0 && missingBooks == 0 -> partialAmber
+                                            else -> palette.textSecondary
+                                        },
                                         fontSize = 11.sp
                                     )
                                 }
@@ -246,11 +263,17 @@ fun SettingsScreen(
                                     onClick = { coverageTarget = tr },
                                     shape = RoundedCornerShape(8.dp),
                                     color = palette.background,
-                                    border = BorderStroke(1.dp, palette.border)
+                                    border = BorderStroke(1.dp, if (partialBooks > 0) partialAmber.copy(alpha = 0.6f) else palette.border)
                                 ) {
+                                    val coverageBtnLabel = when {
+                                        missingBooks == 0 && partialBooks == 0 -> "View 66 Books"
+                                        missingBooks > 0 && partialBooks > 0 -> "$missingBooks Missing • $partialBooks Partial"
+                                        partialBooks > 0 -> "View $partialBooks Partial"
+                                        else -> "View $missingBooks Missing"
+                                    }
                                     Text(
-                                        text = if (tr.bookCount < 66) "View ${66 - tr.bookCount} Missing" else "View 66 Books",
-                                        color = palette.textSecondary,
+                                        text = coverageBtnLabel,
+                                        color = if (partialBooks > 0) partialAmber else palette.textSecondary,
                                         fontSize = 11.sp,
                                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
                                     )
@@ -975,7 +998,11 @@ fun SettingsScreen(
     coverageTarget?.let { tr ->
         val coverage = remember(tr.id, tr.verseCount) { onLoadBookCoverage(tr.id) }
         val missingCount = coverage.count { it.isMissing }
+        val partialCount = coverage.count { it.isPartial }
         val completeCount = coverage.count { it.isComplete }
+        val chaptersLoaded = coverage.sumOf { it.chaptersLoaded }
+        val totalCanonChapters = BibleCanon.totalChapters()
+        val partialAmber = Color(0xFFE5A93C)
 
         ModalBottomSheet(
             onDismissRequest = { coverageTarget = null },
@@ -994,12 +1021,13 @@ fun SettingsScreen(
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    text = if (missingCount > 0) {
-                        "$missingCount books missing • Merge another EPUB or PDF to fill gaps automatically."
-                    } else {
-                        "All 66 books loaded (${tr.verseCount} verses)."
+                    text = buildString {
+                        append("$completeCount full")
+                        if (partialCount > 0) append(" • $partialCount partial")
+                        if (missingCount > 0) append(" • $missingCount missing")
+                        append(" ($chaptersLoaded/$totalCanonChapters ch)")
                     },
-                    color = palette.textSecondary,
+                    color = if (partialCount > 0) partialAmber else palette.textSecondary,
                     fontSize = 12.sp
                 )
                 Spacer(Modifier.height(10.dp))
@@ -1024,8 +1052,19 @@ fun SettingsScreen(
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                     contentPadding = PaddingValues(bottom = 24.dp)
                 ) {
-                    // Show missing & partial books first so gaps are immediately visible
-                    val ordered = coverage.sortedWith(compareBy({ it.isComplete }, { it.chaptersLoaded > 0 }, { it.book.id }))
+                    // Show missing first, then partial, then complete so gaps are immediately visible
+                    val ordered = coverage.sortedWith(
+                        compareBy(
+                            {
+                                when {
+                                    it.isMissing -> 0
+                                    it.isPartial -> 1
+                                    else -> 2
+                                }
+                            },
+                            { it.book.id }
+                        )
+                    )
                     items(ordered, key = { it.book.id }) { item ->
                         Row(
                             modifier = Modifier
@@ -1044,14 +1083,14 @@ fun SettingsScreen(
                             )
                             Text(
                                 text = when {
-                                    item.isMissing -> "Missing"
+                                    item.isMissing -> "Missing (0/${item.book.chapters} ch)"
                                     item.isComplete -> "✓ ${item.chaptersLoaded}/${item.book.chapters} ch"
-                                    else -> "${item.chaptersLoaded}/${item.book.chapters} ch"
+                                    else -> "Partial • ${item.chaptersLoaded}/${item.book.chapters} ch"
                                 },
                                 color = when {
                                     item.isComplete -> palette.accent
                                     item.isMissing -> Color(0xFFE07587)
-                                    else -> palette.textSecondary
+                                    else -> partialAmber
                                 },
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold

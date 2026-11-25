@@ -301,6 +301,49 @@ class BibleTextParserTest {
     }
 
     @Test
+    fun preventsMidChapterBookHijacksHandlesPdfDropCapAndRevertsPageNumbers() {
+        val parser = BibleTextParser("niv")
+        parser.feedText(
+            """
+            1 KINGS
+            11
+            1 King Solomon, however, loved many foreign women besides Pharaoh's daughter.
+            He
+            built a high place for Chemosh.
+            Am I
+            not the king?
+            2 And Rehoboam his
+            son.
+            3 And he set up one in
+            Dan
+            and the other in Bethel.
+            4 Then Solomon rested with his ancestors.
+            12 Rehoboam went to Shechem, for all Israel had gone there to make him king.
+            2 When Jeroboam son of Nebat heard this, he returned from Egypt.
+            3 So they sent for Jeroboam, and he and the whole assembly of Israel went to Rehoboam.
+            13
+            4 "Your father put a heavy yoke on us, but now lighten the harsh labor."
+            5 Rehoboam answered, "Go away for three days and then come back to me."
+            13 By the word of the LORD a man of God came from Judah to Bethel.
+            2 By the word of the LORD he cried out against the altar.
+            """.trimIndent()
+        )
+        val verses = parser.finish()
+        // Must stay strictly in 1 Kings (id = 11) — never hijacked to Hebrews, Amos, Song of Solomon, or Daniel!
+        assertEquals(setOf(11), verses.map { it.bookId }.toSet())
+        val ch11 = verses.filter { it.chapter == 11 }
+        val ch12 = verses.filter { it.chapter == 12 }
+        val ch13 = verses.filter { it.chapter == 13 }
+        assertEquals(listOf(1, 2, 3, 4), ch11.map { it.verse })
+        assertEquals(listOf(1, 2, 3, 4, 5), ch12.map { it.verse })
+        assertTrue(ch12.first().text.contains("Rehoboam went to Shechem"))
+        // Page number "13" between 12:3 and 12:4 must have auto-reverted to chapter 12!
+        assertTrue(ch12[3].text.contains("heavy yoke"))
+        assertEquals(listOf(1, 2), ch13.map { it.verse })
+        assertTrue(ch13.first().text.contains("man of God"))
+    }
+
+    @Test
     fun infersKjvAndNltMetadataFromFilenames() {
         val (id1, code1, _) = BibleTextParser.inferTranslationMeta("NLT Study Bible.epub")
         assertEquals("nlt", id1)

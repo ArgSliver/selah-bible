@@ -125,6 +125,7 @@ data class BookCoverage(
     val verseCount: Int
 ) {
     val isComplete: Boolean get() = chaptersLoaded >= book.chapters
+    val isPartial: Boolean get() = chaptersLoaded in 1 until book.chapters
     val isMissing: Boolean get() = chaptersLoaded == 0
 }
 

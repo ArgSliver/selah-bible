@@ -137,7 +137,9 @@ object EpubImporter {
                 val entriesToRead = allSpine.filterNot { isNonScripturePath(it) }
                 val total = entriesToRead.size.coerceAtLeast(1)
                 entriesToRead.forEachIndexed { idx, entryPath ->
-                    val entry = zip.getEntry(entryPath) ?: return@forEachIndexed
+                    val entry = zip.getEntry(entryPath)
+                        ?: runCatching { zip.getEntry(java.net.URLDecoder.decode(entryPath, "UTF-8")) }.getOrNull()
+                        ?: return@forEachIndexed
                     val html = zip.getInputStream(entry).bufferedReader(Charsets.UTF_8).use { it.readText() }
                     parser.hintSectionTitle(entryPath.substringAfterLast('/'))
                     val plain = htmlToStructuredText(html)
