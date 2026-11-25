@@ -25,6 +25,7 @@ class BibleTextParser(private val translationId: String) {
     private val currentText = StringBuilder()
     private var expectingImplicitVerseOne: Boolean = false
     private var lastLineWasExplicitRef: Boolean = false
+    private var sawMarkedVersesInCurrentBook: Boolean = false
 
     // Keyed by packed (bookId, chapter, verse)
     private val verseMap = LinkedHashMap<Long, BibleVerse>(32000)
@@ -53,12 +54,17 @@ class BibleTextParser(private val translationId: String) {
         private val chapterColonVerseStandaloneRegex = Regex("^(\\d{1,3}):(\\d{1,3})(?:[-–—]\\d{1,3})?$")
         private val chapterColonVerseRegex = Regex("^(\\d{1,3}):(\\d{1,3})(?:[-–—]\\d{1,3})?\\s+(.+)$")
         private val inlineChapterColonVerseRegex = Regex("(?<=\\s|^)(\\d{1,3}):(\\d{1,3})(?:[-–—]\\d{1,3})?\\s+")
-        private val leadingVerseRegex = Regex("^(\\d{1,3})(?:[-–—]\\d{1,3})?(?:[.)\\]]|\\s+)\\s*(.+)$")
+        // Supports spaced ("1 In the beginning"), punctuated ("1. In..."), and PDF attached superscripts ("1In the beginning")
+        private val leadingVerseRegex = Regex("^(\\d{1,3})(?:[-–—]\\d{1,3})?(?:[.)\\]]\\s*|\\s+|(?=[A-Z“\"‘'\\(]))(.+)$")
         private val inlineVerseMarkerRegex = Regex("⟦(\\d{1,3})⟧")
-        private val inlineNumericVerseRegex = Regex("(?<=[.!?;:\"'”\\)])\\s+(\\d{1,3})(?:[-–—]\\d{1,3})?\\s+(?=[A-Z“\"‘'\\(])")
+        // Supports both spaced ("...void. 2 And") and attached PDF superscripts ("...void.2And", "...void. 2And")
+        private val inlineNumericVerseRegex = Regex("(?<=[.!?;,\"'”’\\)—–-]|(?<!\\d):)\\s*(\\d{1,3})(?:[-–—]\\d{1,3})?\\s*(?=[A-Z“\"‘'\\(])")
         private val standaloneNumberRegex = Regex("^(\\d{1,3})$")
         private val filenameBookChapterRegex = Regex("^([1-3]?\\s?[a-zA-Z]+(?:\\s+[a-zA-Z]+)*?)\\s*(\\d{1,3})$")
-        private val crossRefPrefixRegex = Regex("^(?:see|cf\\.?|compare|also|note|notes|study note|cross-?ref)\\b", RegexOption.IGNORE_CASE)
+        private val crossRefPrefixRegex = Regex(
+            "^(?:cf\\.?|study\\s+notes?|cross-?ref(?:erence)?s?|footnotes?)\\b|^(?:see|compare|also|notes?)\\s+(?:note|notes|also|[1-3]?\\s?[A-Za-z.]+\\s+\\d{1,3}:\\d{1,3}|\\d{1,3}:\\d{1,3})",
+            RegexOption.IGNORE_CASE
+        )
 
         private val songSpeakerLabels = setOf(
             "young woman", "young man", "young women of jerusalem", "friends",
@@ -101,6 +107,7 @@ class BibleTextParser(private val translationId: String) {
                     currentVerse = 0
                     expectingImplicitVerseOne = (directBook.chapters == 1)
                     lastLineWasExplicitRef = false
+                    sawMarkedVersesInCurrentBook = false
                 }
                 return
             }
@@ -111,6 +118,7 @@ class BibleTextParser(private val translationId: String) {
                 val ch = m.groupValues[2].toIntOrNull()
                 if (book != null && ch != null && ch in 1..book.chapters) {
                     flushCurrentVerse()
+                    if (book.id != currentBook?.id) sawMarkedVersesInCurrentBook = false
                     currentBook = book
                     currentChapter = ch
                     currentVerse = 0
@@ -132,6 +140,12 @@ class BibleTextParser(private val translationId: String) {
         }
     }
 
+    private fun exitVerseForStudyNote() {
+        flushCurrentVerse()
+        currentVerse = 0
+        expectingImplicitVerseOne = false
+    }
+
     private fun processLine(rawLine: String) {
         if (rawLine.isEmpty()) return
 
@@ -140,7 +154,10 @@ class BibleTextParser(private val translationId: String) {
         if (line.isEmpty()) return
 
         if (line.length <= 4 && line.all { it == '-' || it == '*' || it == '•' || it == '—' }) return
-        if (crossRefPrefixRegex.containsMatchIn(line)) return
+        if (crossRefPrefixRegex.containsMatchIn(line)) {
+            exitVerseForStudyNote()
+            return
+        }
         if (runningHeaderRangeRegex.matches(line)) return
 
         val upper = line.uppercase()
@@ -170,8 +187,9 @@ class BibleTextParser(private val translationId: String) {
                 // quoting a completely different book before Chapter 1 has started!
                 val isStrayIntroQuote = cur != null && currentChapter == 0 && !lastLineWasExplicitRef &&
                     book.id != cur.id && book.id != cur.id + 1
-                if (!isStrayIntroQuote) {
+                if (!isStrayIntroQuote && !isStudyNoteOrCrossRef(body)) {
                     flushCurrentVerse()
+                    if (book.id != currentBook?.id) sawMarkedVersesInCurrentBook = false
                     currentBook = book
                     currentChapter = ch
                     currentVerse = v
@@ -197,6 +215,7 @@ class BibleTextParser(private val translationId: String) {
                     return
                 }
                 flushCurrentVerse()
+                if (bookOnly.id != currentBook?.id) sawMarkedVersesInCurrentBook = false
                 currentBook = bookOnly
                 currentChapter = if (bookOnly.chapters == 1) 1 else 0
                 currentVerse = 0
@@ -221,6 +240,7 @@ class BibleTextParser(private val translationId: String) {
                         return
                     }
                     flushCurrentVerse()
+                    if (book.id != currentBook?.id) sawMarkedVersesInCurrentBook = false
                     currentBook = book
                     currentChapter = ch
                     currentVerse = 0
@@ -273,6 +293,11 @@ class BibleTextParser(private val translationId: String) {
 
         // 5. Standalone "Chapter:Verse" on its own line
         chapterColonVerseStandaloneRegex.matchEntire(line)?.let { m ->
+            if (sawMarkedVersesInCurrentBook) {
+                // Study Bible note heading like "23:6" after inline-marked scripture
+                exitVerseForStudyNote()
+                return
+            }
             val ch = m.groupValues[1].toIntOrNull()
             val v = m.groupValues[2].toIntOrNull()
             if (ch != null && v != null && ch in 1..activeBook.chapters && v in 1..176) {
@@ -287,6 +312,11 @@ class BibleTextParser(private val translationId: String) {
 
         // 6. One or more "Chapter:Verse text" entries on a line
         if (chapterColonVerseRegex.matches(line)) {
+            if (sawMarkedVersesInCurrentBook && !line.contains('⟦')) {
+                // In Study Bible EPUBs, scripture uses inline markers while Study Notes use "23:6 ..."
+                exitVerseForStudyNote()
+                return
+            }
             val hits = inlineChapterColonVerseRegex.findAll(line).toList()
             if (hits.size > 1) {
                 for (i in hits.indices) {
@@ -296,6 +326,10 @@ class BibleTextParser(private val translationId: String) {
                         val segStart = hits[i].range.last + 1
                         val segEnd = if (i + 1 < hits.size) hits[i + 1].range.first else line.length
                         val body = line.substring(segStart, segEnd).trim()
+                        if (isStudyNoteOrCrossRef(body)) {
+                            exitVerseForStudyNote()
+                            continue
+                        }
                         flushCurrentVerse()
                         currentChapter = ch
                         currentVerse = v
@@ -311,6 +345,10 @@ class BibleTextParser(private val translationId: String) {
                 val v = m.groupValues[2].toIntOrNull()
                 val body = m.groupValues[3]
                 if (ch != null && v != null && ch in 1..activeBook.chapters && v in 1..176) {
+                    if (isStudyNoteOrCrossRef(body)) {
+                        exitVerseForStudyNote()
+                        return
+                    }
                     flushCurrentVerse()
                     currentChapter = ch
                     currentVerse = v
@@ -324,7 +362,6 @@ class BibleTextParser(private val translationId: String) {
 
         // 7. Explicit superscript/span verse markers injected by EPUB parser: ⟦1⟧ text ⟦2⟧ text
         if (line.contains('⟦')) {
-            if (currentChapter == 0) currentChapter = 1
             lastLineWasExplicitRef = false
             feedMarkedParagraph(line)
             return
@@ -372,9 +409,52 @@ class BibleTextParser(private val translationId: String) {
 
     private fun isPlausibleVerseNumber(v: Int, book: BibleBook): Boolean {
         if (v !in 1..176) return false
-        if (currentVerse == 0) return v <= 5
+        if (currentVerse == 0) return v <= 3
         if (v == 1 && currentChapter < book.chapters) return true
-        return v in (currentVerse + 1)..(currentVerse + 8)
+        return v in (currentVerse + 1)..(currentVerse + 3)
+    }
+
+    /**
+     * Filters out Study Bible commentary notes and cross-reference footnotes
+     * (e.g. "Ps 32:10;", "Josh", "Hos", "Isa", "(69:16; 86:17; see 18:6)", "Ps 24 The shepherd of Ps 23...").
+     */
+    internal fun isStudyNoteOrCrossRef(raw: String): Boolean {
+        val text = raw.trim()
+        if (text.length < 3) return true
+
+        // Single bare book name or abbreviation ("Josh", "Hos", "Isa", "Ps")
+        if (text.length <= 20 && !text.contains(' ') && BibleCanon.findByName(text.trimEnd('.', ';', ',')) != null) {
+            return true
+        }
+
+        // Pure cross-reference line like "Ps 32:10;" or "Ps 26:1-2; 39:1;" or "1 Cor 12:4"
+        if (Regex("^[1-3]?\\s?[A-Za-z]{2,12}\\.?\\s+\\d{1,3}:\\d{1,3}(?:[-–—]\\d{1,3})?(?:\\s*[;,]\\s*(?:[1-3]?\\s?[A-Za-z.]+\\s+)?\\d{1,3}:\\d{1,3}(?:[-–—]\\d{1,3})?)*\\s*;?$")
+                .matches(text)
+        ) {
+            return true
+        }
+
+        // Parenthesized Bible chapter:verse citations never occur in actual scripture: "(104:15; 133:2)", "(7:1)", "(see 18:6)"
+        if (Regex("\\(\\s*(?:see\\s+|cf\\.?\\s+|also\\s+)?(?:[1-3]?\\s?[A-Za-z.]+\\s+)?\\d{1,3}:\\d{1,3}").containsMatchIn(text)) {
+            return true
+        }
+
+        // Semicolon-separated chapter:verse citation list: "32:10;" or "26:1-2; 39:1"
+        if (Regex("\\b\\d{1,3}:\\d{1,3}(?:[-–—]\\d{1,3})?\\s*;").containsMatchIn(text)) {
+            return true
+        }
+
+        // Abbreviated commentary citations ("Ps 23", "Ps 24", "Gen 1", "Matt 5", "1 Cor 13")
+        if (Regex("\\b(?:Gen|Exod|Lev|Num|Deut|Josh|Judg|1\\s?Sam|2\\s?Sam|1\\s?Kgs|2\\s?Kgs|1\\s?Chr|2\\s?Chr|Neh|Esth|Ps|Prov|Eccl|Isa|Jer|Lam|Ezek|Hos|Mic|Nah|Hab|Zeph|Zech|Mal|Matt|Mk|Lk|Jn|Rom|1\\s?Cor|2\\s?Cor|Gal|Eph|Phil|Col|1\\s?Thess|2\\s?Thess|1\\s?Tim|2\\s?Tim|Heb|Jas|1\\s?Pet|2\\s?Pet|Rev)\\.?\\s+\\d{1,3}(?:[:\\s]|$)|\\bDan\\.?\\s+\\d{1,3}:\\d{1,3}").containsMatchIn(text)) {
+            return true
+        }
+
+        // Study Bible textual footnote openings
+        if (Regex("^(?:(?:Hebrew|Greek|Aramaic)\\s+(?:reads|text|literally|word|term|meaning|manuscripts|is|means)|Or\\s+[“\"]|Literally,|Some\\s+manuscripts|Other\\s+manuscripts|See\\s+note\\b|Compare\\s+)").containsMatchIn(text)) {
+            return true
+        }
+
+        return false
     }
 
     private fun isLikelySectionHeading(line: String): Boolean {
@@ -396,8 +476,13 @@ class BibleTextParser(private val translationId: String) {
         val matches = inlineVerseMarkerRegex.findAll(line).toList()
         if (matches.isEmpty()) return
 
+        // Ignore chapter navigation grids (e.g. "⟦1⟧ ⟦2⟧ ⟦3⟧ ... ⟦50⟧" with zero words)
+        if (matches.size >= 3 && line.replace(inlineVerseMarkerRegex, "").trim().isEmpty()) {
+            return
+        }
+
         val beforeFirst = line.substring(0, matches.first().range.first).trim()
-        if (beforeFirst.isNotEmpty()) {
+        if (beforeFirst.isNotEmpty() && !isStudyNoteOrCrossRef(beforeFirst)) {
             if (currentVerse > 0) {
                 appendToCurrent(beforeFirst)
             } else if (expectingImplicitVerseOne && beforeFirst.length >= 10) {
@@ -417,23 +502,89 @@ class BibleTextParser(private val translationId: String) {
             val segText = line.substring(segStart, segEnd).trim()
 
             val activeBook = currentBook ?: continue
+            val nextMarkerNum = matches.getOrNull(i + 1)?.groupValues?.get(1)?.toIntOrNull()
+
+            // Skip cross-reference footnote segments without advancing currentVerse!
+            if (segText.isNotEmpty() && isStudyNoteOrCrossRef(segText)) {
+                exitVerseForStudyNote()
+                continue
+            }
+
+            // Detect Calibre drop-cap chapter rollover across both single-paragraph and multi-paragraph chapters
+            // (e.g. Ch 1 v31 -> ⟦2⟧ Verse 1 text, or Ch 23 v6 -> ⟦24⟧ Verse 1 text, or direct jump to Psalm ⟦23⟧).
+            val isCalibreChapterDropCap = vNum in 1..activeBook.chapters && (
+                (vNum == currentChapter + 1 && vNum >= 2 && (
+                    nextMarkerNum == 2 ||
+                    currentVerse == 0 ||
+                    vNum < currentVerse ||
+                    vNum > currentVerse + 3
+                )) ||
+                (currentChapter == 0 && currentVerse == 0 && vNum >= 2 && (
+                    nextMarkerNum == 2 || (segText.length >= 12 && !isStudyNoteOrCrossRef(segText))
+                ))
+            )
+
+            if (isCalibreChapterDropCap) {
+                flushCurrentVerse()
+                sawMarkedVersesInCurrentBook = true
+                currentChapter = vNum
+                currentVerse = 0
+                expectingImplicitVerseOne = true
+                if (segText.isNotEmpty()) {
+                    currentVerse = 1
+                    expectingImplicitVerseOne = false
+                    appendToCurrent(segText)
+                }
+                continue
+            }
+
+            // Handle the rare coincidence where chapter C had exactly C verses, so drop-cap C+1
+            // was temporarily stored as (C, C+1) and now verse 2 arrives in the next paragraph!
+            if (vNum == 2 && currentChapter in 1 until activeBook.chapters && currentVerse == currentChapter + 1) {
+                flushCurrentVerse()
+                val oldKey = (activeBook.id.toLong() shl 20) or (currentChapter.toLong() shl 10) or currentVerse.toLong()
+                val promoted = verseMap.remove(oldKey)
+                currentChapter += 1
+                if (promoted != null) {
+                    val newKey = (activeBook.id.toLong() shl 20) or (currentChapter.toLong() shl 10) or 1L
+                    verseMap[newKey] = promoted.copy(chapter = currentChapter, verse = 1)
+                }
+                currentVerse = 2
+                expectingImplicitVerseOne = false
+                sawMarkedVersesInCurrentBook = true
+                if (segText.isNotEmpty()) {
+                    appendToCurrent(segText)
+                }
+                continue
+            }
+
+            if (currentChapter == 0) currentChapter = 1
+
+            if (!isPlausibleVerseNumber(vNum, activeBook)) {
+                // Ignore phantom footnote / cross-reference numbers (e.g. 7, 10, 13, 21, 28 in Psalm 23!)
+                continue
+            }
+
             if (vNum == 1 && currentVerse > 1 && currentChapter < activeBook.chapters) {
                 flushCurrentVerse()
                 currentChapter += 1
             } else {
                 flushCurrentVerse()
             }
-            if (vNum in 1..176) {
-                currentVerse = vNum
-                expectingImplicitVerseOne = false
-                if (segText.isNotEmpty()) {
-                    appendToCurrent(segText)
-                }
+            sawMarkedVersesInCurrentBook = true
+            currentVerse = vNum
+            expectingImplicitVerseOne = false
+            if (segText.isNotEmpty()) {
+                appendToCurrent(segText)
             }
         }
     }
 
     private fun feedVerseSegments(text: String) {
+        if (isStudyNoteOrCrossRef(text)) {
+            exitVerseForStudyNote()
+            return
+        }
         val matches = inlineNumericVerseRegex.findAll(text).toList()
         if (matches.isEmpty()) {
             appendToCurrent(text)
@@ -443,7 +594,7 @@ class BibleTextParser(private val translationId: String) {
         var cursor = 0
         for (m in matches) {
             val candidateVerse = m.groupValues[1].toIntOrNull()
-            if (candidateVerse != null && candidateVerse in (currentVerse + 1)..(currentVerse + 5)) {
+            if (candidateVerse != null && candidateVerse in (currentVerse + 1)..(currentVerse + 3)) {
                 val before = text.substring(cursor, m.range.first).trim()
                 if (before.isNotEmpty()) appendToCurrent(before)
                 flushCurrentVerse()
@@ -474,7 +625,7 @@ class BibleTextParser(private val translationId: String) {
         val book = currentBook ?: return
         if (currentChapter in 1..book.chapters && currentVerse in 1..176 && currentText.isNotEmpty()) {
             val body = cleanVerseBody(currentText.toString())
-            if (body.length >= 2) {
+            if (body.length >= 4 && !isStudyNoteOrCrossRef(body)) {
                 val key = (book.id.toLong() shl 20) or (currentChapter.toLong() shl 10) or currentVerse.toLong()
                 val existing = verseMap[key]
                 if (existing == null || (existing.text.length < 20 && body.length > existing.text.length)) {

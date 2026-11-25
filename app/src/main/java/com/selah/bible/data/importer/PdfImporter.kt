@@ -35,21 +35,27 @@ object PdfImporter {
             } ?: error("Unable to open selected PDF file.")
 
             val placeholderId = overrideTranslationId ?: "pending"
-            val parser = BibleTextParser(placeholderId)
-            val stripper = PDFTextStripper().apply {
-                sortByPosition = true
-            }
-
             var pdfTitle: String? = null
             val frontMatter = StringBuilder()
 
-            PDDocument.load(tempFile).use { document ->
+            val rawVerses = PDDocument.load(tempFile).use { document ->
                 val info = document.documentInformation
                 pdfTitle = info?.title?.trim()?.takeIf { it.isNotEmpty() }
                 if (!info?.subject.isNullOrBlank()) frontMatter.append(info.subject).append('\n')
                 if (!info?.author.isNullOrBlank()) frontMatter.append(info.author).append('\n')
 
                 val totalPages = document.numberOfPages.coerceAtLeast(1)
+
+                // Sample initial pages in both content-stream order (better for 2-column Bibles)
+                // and visual-position order, then pick whichever yields cleaner, fuller scripture.
+                val sampleEnd = minOf(totalPages, 25)
+                val useSortByPosition = chooseSortByPosition(document, sampleEnd)
+
+                val parser = BibleTextParser(placeholderId)
+                val stripper = PDFTextStripper().apply {
+                    sortByPosition = useSortByPosition
+                }
+
                 for (page in 1..totalPages) {
                     stripper.startPage = page
                     stripper.endPage = page
@@ -71,9 +77,8 @@ object PdfImporter {
                         )
                     }
                 }
+                parser.finish()
             }
-
-            val rawVerses = parser.finish()
             val detected = TranslationDetector.detect(
                 fileName = fileName,
                 metadataTitle = pdfTitle,
@@ -85,6 +90,33 @@ object PdfImporter {
             return ParsedImportBatch(detected.copy(id = finalId), verses)
         } finally {
             tempFile.delete()
+        }
+    }
+
+    private fun chooseSortByPosition(document: PDDocument, sampleEnd: Int): Boolean {
+        return try {
+            val streamParser = BibleTextParser("sample")
+            val streamStripper = PDFTextStripper().apply { sortByPosition = false }
+            val posParser = BibleTextParser("sample")
+            val posStripper = PDFTextStripper().apply { sortByPosition = true }
+
+            for (page in 1..sampleEnd) {
+                streamStripper.startPage = page
+                streamStripper.endPage = page
+                streamParser.feedText(streamStripper.getText(document))
+
+                posStripper.startPage = page
+                posStripper.endPage = page
+                posParser.feedText(posStripper.getText(document))
+            }
+
+            val streamVerses = streamParser.finish()
+            val posVerses = posParser.finish()
+            // Prefer content-stream order on ties (preserves two-column reading order);
+            // only switch to sortByPosition if it parses meaningfully more verses.
+            posVerses.size > streamVerses.size + 5
+        } catch (_: Exception) {
+            false
         }
     }
 }

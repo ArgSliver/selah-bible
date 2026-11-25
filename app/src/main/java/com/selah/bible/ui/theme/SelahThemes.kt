@@ -82,7 +82,7 @@ object SelahThemeCatalog {
         SelahPalette(
             id = "clean_white",
             name = "Clean White",
-            subtitle = "Minimal neutral light • YouVersion style",
+            subtitle = "Crisp minimal light • Neutral ink",
             isDark = false,
             isOledOptimized = false,
             background = Color(0xFFFFFFFF),
@@ -112,7 +112,7 @@ object SelahThemeCatalog {
         SelahPalette(
             id = "neutral_dark",
             name = "Neutral Dark",
-            subtitle = "Clean charcoal • YouVersion dark style",
+            subtitle = "Clean charcoal • Minimal dark",
             isDark = true,
             isOledOptimized = false,
             background = Color(0xFF121212),

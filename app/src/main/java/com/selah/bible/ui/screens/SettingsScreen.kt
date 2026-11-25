@@ -487,7 +487,7 @@ fun SettingsScreen(
                 }
 
                 Spacer(Modifier.height(14.dp))
-                Text("One-Tap Neutral Presets (YouVersion Style)", color = palette.textSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Text("One-Tap Neutral Presets", color = palette.textSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(8.dp))
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),

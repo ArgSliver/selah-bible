@@ -25,10 +25,10 @@ data class ParsedImportBatch(
 object EpubImporter {
 
     private val skippedFileKeywords = listOf(
-        "cover", "copyright", "colophon", "toc", "nav", "contents",
-        "glossary", "concordance", "dictionary", "maps", "timeline",
-        "credits", "acknowledg", "dedication", "backmatter", "frontmatter",
-        "studynote", "study_note", "footnote", "endnote", "index", "tableofcontents"
+        "cover", "copyright", "colophon", "glossary", "concordance", "dictionary",
+        "maps", "timeline", "credits", "acknowledg", "dedication", "backmatter",
+        "frontmatter", "studynote", "study_note", "footnote", "endnote",
+        "tableofcontents", "subject_index", "topic_index", "scripture_index"
     )
 
     private val scriptStyleAsideRegex = Regex(
@@ -39,8 +39,16 @@ object EpubImporter {
         "<(div|section|p)\\b[^>]*class=[\"'][^\"']*(?:study[-_]?note|footnote|endnote|cross[-_]?ref|commentary|sidebar|callout|profile|note[-_]?body|fn[-_]?text)[^\"']*[\"'][^>]*>[\\s\\S]*?</\\1>",
         RegexOption.IGNORE_CASE
     )
+    private val emptyAnchorRegex = Regex(
+        "<a\\b[^>]*>(?:\\s*</a>)|<a\\b[^>]*/>",
+        RegexOption.IGNORE_CASE
+    )
     private val noteRefLinkRegex = Regex(
-        "<a\\b[^>]*(?:epub:type=[\"']noteref[\"']|class=[\"'][^\"']*(?:noteref|footnote|fn|xref|crossref)[^\"']*[\"'])[^>]*>[\\s\\S]*?</a>",
+        "<a\\b[^>]*(?:epub:type=[\"']noteref[\"']|href=[\"']#(?:fn|ftn|note|endnote|xref|ref)[^\"']*[\"']|class=[\"'][^\"']*(?:noteref|footnote|fn|xref|crossref)[^\"']*[\"'])[^>]*>[\\s\\S]*?</a>",
+        RegexOption.IGNORE_CASE
+    )
+    private val inlineFootnoteCalloutRegex = Regex(
+        "<a\\b[^>]*href=[^>]*>(?:<[^>]+>)*\\s*(?:[a-z*†‡§]|\\d{1,3}\\s*:\\s*\\d{1,3})\\s*(?:<[^>]+>)*</a>|<sup\\b[^>]*>\\s*[a-z*†‡§]\\s*</sup>",
         RegexOption.IGNORE_CASE
     )
     private val headingTagRegex = Regex(
@@ -59,6 +67,12 @@ object EpubImporter {
         "<sup\\b[^>]*>(?:<[^>]+>)*\\s*(\\d{1,3})(?:[-–—]\\d{1,3})?\\s*(?:<[^>]+>)*</sup>",
         RegexOption.IGNORE_CASE
     )
+    // Calibre-converted EPUBs (like NLT Study Bible) rename verse classes to generic calibreXX spans/bold tags
+    private val genericInlineVerseRegex = Regex(
+        "<(?:span|b|strong)\\b[^>]*>\\s*(\\d{1,3})\\s*</(?:span|b|strong)>",
+        RegexOption.IGNORE_CASE
+    )
+    private val tableCellTags = Regex("</?(?:td|th)\\b[^>]*>", RegexOption.IGNORE_CASE)
     private val blockBreakTags = Regex(
         "</?(?:p|div|h[1-6]|br|li|tr|section|article|blockquote)\\b[^>]*>",
         RegexOption.IGNORE_CASE
@@ -158,9 +172,13 @@ object EpubImporter {
         }
     }
 
-    private fun isNonScripturePath(path: String): Boolean {
+    internal fun isNonScripturePath(path: String): Boolean {
         val base = path.substringAfterLast('/').lowercase()
-        return skippedFileKeywords.any { it in base }
+        val stem = base.substringBeforeLast('.')
+        // Never skip Calibre's index_split_000.html / text_split_000.html chapters!
+        if ("split" in stem) return false
+        if (stem == "toc" || stem == "nav" || stem == "contents" || stem == "index") return true
+        return skippedFileKeywords.any { it in stem }
     }
 
     private fun resolveOpf(zip: ZipFile): OpfInfo {
@@ -248,26 +266,34 @@ object EpubImporter {
     }
 
     internal fun htmlToStructuredText(html: String): String {
-        var s = scriptStyleAsideRegex.replace(html, "\n")
+        // Raw newlines in HTML source are whitespace, not paragraph breaks; collapse them first
+        // so wrapped <p> paragraphs keep all their inline verse markers on one logical line.
+        var s = html.replace("\r\n", " ").replace('\r', ' ').replace('\n', ' ')
+        s = scriptStyleAsideRegex.replace(s, "\n")
         s = studyNoteBlockRegex.replace(s, "\n")
+        s = emptyAnchorRegex.replace(s, "")
         s = noteRefLinkRegex.replace(s, "")
+        s = inlineFootnoteCalloutRegex.replace(s, "")
         // Convert drop-cap chapter numbers into explicit CHAPTER lines
         s = chapterDropCapRegex.replace(s) { m -> "\nCHAPTER ${m.groupValues[1]}\n" }
-        // Tag clean h1-h2 book/chapter titles with ⟦H⟧ ONLY if they don't already contain CHAPTER/verse markers
+        // Tag clean h1-h3 book/chapter titles with ⟦H⟧ ONLY if they don't already contain CHAPTER/verse markers
         s = headingTagRegex.replace(s) { m ->
             val rawInner = m.groupValues[2]
             if ("CHAPTER " in rawInner || "⟦" in rawInner) {
                 "\n$rawInner\n"
             } else {
-                val inner = allTagsRegex.replace(rawInner, " ").replace(Regex("\\s+"), " ").trim()
+                val inner = allTagsRegex.replace(rawInner, "").replace(Regex("\\s+"), " ").trim()
                 if (inner.isNotEmpty() && inner.length <= 100) "\n⟦H⟧$inner\n" else "\n$rawInner\n"
             }
         }
-        // Convert verse tags (including nested <a>/<b> inside <sup> or <span class="verse">)
+        // Convert verse tags (including nested <a>/<b> inside <sup>, class="verse", and Calibre <span>N</span>)
         s = verseClassTagRegex.replace(s) { m -> " ⟦${m.groupValues[1]}⟧ " }
         s = plainSupVerseRegex.replace(s) { m -> " ⟦${m.groupValues[1]}⟧ " }
+        s = genericInlineVerseRegex.replace(s) { m -> " ⟦${m.groupValues[1]}⟧ " }
+        s = tableCellTags.replace(s, " ")
         s = blockBreakTags.replace(s, "\n")
-        s = allTagsRegex.replace(s, " ")
+        // Strip remaining inline tags without inserting spaces so small-caps (L<span>ORD</span>) stay intact
+        s = allTagsRegex.replace(s, "")
         s = decodeHtmlEntities(s)
         return s
     }

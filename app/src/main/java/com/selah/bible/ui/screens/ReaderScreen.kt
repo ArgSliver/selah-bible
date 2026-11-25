@@ -592,7 +592,7 @@ fun ReaderScreen(
         }
     }
 
-    // Quick Style Bottom Sheet (YouVersion-style quick appearance controls)
+    // Quick Style Bottom Sheet (quick reading appearance controls)
     if (showQuickStyle) {
         ModalBottomSheet(
             onDismissRequest = { showQuickStyle = false },
