@@ -12,8 +12,8 @@ android {
         applicationId = "com.selah.bible"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.0.1"
+        versionCode = System.getenv("SELAH_VERSION_CODE")?.toIntOrNull() ?: 10002
+        versionName = System.getenv("SELAH_VERSION_NAME")?.takeIf { it.isNotBlank() } ?: "1.0.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

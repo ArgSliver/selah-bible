@@ -80,6 +80,66 @@ object SelahThemeCatalog {
             onAccent = Color(0xFFFFFBF4)
         ),
         SelahPalette(
+            id = "clean_white",
+            name = "Clean White",
+            subtitle = "Minimal neutral light • YouVersion style",
+            isDark = false,
+            isOledOptimized = false,
+            background = Color(0xFFFFFFFF),
+            surface = Color(0xFFF6F6F7),
+            surfaceAlt = Color(0xFFECECEF),
+            border = Color(0xFFE4E4E7),
+            textPrimary = Color(0xFF18181B),
+            textSecondary = Color(0xFF71717A),
+            accent = Color(0xFF27272A),
+            onAccent = Color(0xFFFFFFFF)
+        ),
+        SelahPalette(
+            id = "soft_gray",
+            name = "Soft Gray",
+            subtitle = "Calm neutral stone • Low glare",
+            isDark = false,
+            isOledOptimized = false,
+            background = Color(0xFFF4F4F5),
+            surface = Color(0xFFFFFFFF),
+            surfaceAlt = Color(0xFFEAEAEF),
+            border = Color(0xFFE0E0E5),
+            textPrimary = Color(0xFF1F1F23),
+            textSecondary = Color(0xFF6E6E77),
+            accent = Color(0xFF3F3F46),
+            onAccent = Color(0xFFFFFFFF)
+        ),
+        SelahPalette(
+            id = "neutral_dark",
+            name = "Neutral Dark",
+            subtitle = "Clean charcoal • YouVersion dark style",
+            isDark = true,
+            isOledOptimized = false,
+            background = Color(0xFF121212),
+            surface = Color(0xFF1C1C1E),
+            surfaceAlt = Color(0xFF262629),
+            border = Color(0xFF2E2E32),
+            textPrimary = Color(0xFFF2F2F7),
+            textSecondary = Color(0xFF9898A0),
+            accent = Color(0xFFE4E4E7),
+            onAccent = Color(0xFF121212)
+        ),
+        SelahPalette(
+            id = "amoled_neutral",
+            name = "Pure Black Neutral",
+            subtitle = "True OLED black • Minimal silver",
+            isDark = true,
+            isOledOptimized = true,
+            background = Color(0xFF000000),
+            surface = Color(0xFF0D0D0F),
+            surfaceAlt = Color(0xFF18181B),
+            border = Color(0xFF27272A),
+            textPrimary = Color(0xFFF4F4F5),
+            textSecondary = Color(0xFF9CA3AF),
+            accent = Color(0xFFD4D4D8),
+            onAccent = Color(0xFF09090B)
+        ),
+        SelahPalette(
             id = "sepia_parchment",
             name = "Sepia Parchment",
             subtitle = "Warm archival parchment",
@@ -203,13 +263,15 @@ object SelahThemeCatalog {
 
     val accents: List<AccentSwatch> = listOf(
         AccentSwatch("default", "Theme Default", null, null),
+        AccentSwatch("monochrome", "Pure Neutral", Color(0xFFE4E4E7), Color(0xFF27272A)),
+        AccentSwatch("cool_slate", "Cool Slate", Color(0xFF94A3B8), Color(0xFF475569)),
+        AccentSwatch("calm_teal", "Calm Teal", Color(0xFF2DD4BF), Color(0xFF0F766E)),
         AccentSwatch("warm_gold", "Warm Gold", Color(0xFFD4A853), Color(0xFF9A6B1A)),
         AccentSwatch("amber", "Copper Amber", Color(0xFFEB9852), Color(0xFFB55A16)),
         AccentSwatch("sage", "Olive Sage", Color(0xFF7CC892), Color(0xFF2E7D4F)),
         AccentSwatch("ocean", "Sapphire", Color(0xFF6BB5FF), Color(0xFF1E63B5)),
         AccentSwatch("crimson", "Burgundy", Color(0xFFE87A8A), Color(0xFFA12B3F)),
-        AccentSwatch("lavender", "Soft Iris", Color(0xFFB89CFF), Color(0xFF6342B8)),
-        AccentSwatch("monochrome", "Monochrome", Color(0xFFE6E6E6), Color(0xFF262626))
+        AccentSwatch("lavender", "Soft Iris", Color(0xFFB89CFF), Color(0xFF6342B8))
     )
 
     val highlightKeys = listOf("gold", "sage", "sky", "rose", "lavender")
@@ -295,6 +357,7 @@ object SelahThemeCatalog {
 }
 
 val LocalSelahPalette = staticCompositionLocalOf { SelahThemeCatalog.themes.first() }
+val LocalCardStyle = staticCompositionLocalOf { com.selah.bible.data.CardStyleChoice.OUTLINED }
 
 @Composable
 fun SelahTheme(
@@ -344,7 +407,10 @@ fun SelahTheme(
         )
     }
 
-    CompositionLocalProvider(LocalSelahPalette provides palette) {
+    CompositionLocalProvider(
+        LocalSelahPalette provides palette,
+        LocalCardStyle provides settings.cardStyle
+    ) {
         MaterialTheme(
             colorScheme = colorScheme,
             content = content

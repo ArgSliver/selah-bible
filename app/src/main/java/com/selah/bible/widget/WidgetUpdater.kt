@@ -44,6 +44,18 @@ object WidgetUpdater {
             mutedColor = Color.parseColor("#FF9B9387"),
             accentColor = Color.parseColor("#FFD4A853")
         )
+        WidgetThemeChoice.CLEAN_WHITE -> WidgetPalette(
+            bgRes = R.drawable.widget_bg_white,
+            textColor = Color.parseColor("#FF18181B"),
+            mutedColor = Color.parseColor("#FF71717A"),
+            accentColor = Color.parseColor("#FF27272A")
+        )
+        WidgetThemeChoice.NEUTRAL_DARK -> WidgetPalette(
+            bgRes = R.drawable.widget_bg_neutral_dark,
+            textColor = Color.parseColor("#FFF4F4F5"),
+            mutedColor = Color.parseColor("#FFA1A1AA"),
+            accentColor = Color.parseColor("#FFD4D4D8")
+        )
         WidgetThemeChoice.PAPER -> WidgetPalette(
             bgRes = R.drawable.widget_bg_paper,
             textColor = Color.parseColor("#FF231F1A"),

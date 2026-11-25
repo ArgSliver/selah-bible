@@ -463,7 +463,9 @@ class MainActivity : ComponentActivity() {
                             selected = selected,
                             onClick = { currentTab = tab },
                             icon = { Icon(icon, contentDescription = tab.label) },
-                            label = { Text(tab.label, fontSize = 11.sp) },
+                            label = if (settings.showNavLabels) {
+                                { Text(tab.label, fontSize = 11.sp) }
+                            } else null,
                             colors = NavigationBarItemDefaults.colors(
                                 selectedIconColor = palette.accent,
                                 selectedTextColor = palette.accent,

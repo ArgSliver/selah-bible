@@ -8,6 +8,46 @@ import kotlinx.coroutines.flow.asStateFlow
 import java.time.LocalDate
 
 enum class ReadingLayoutMode { VERSE_BY_VERSE, PARAGRAPH }
+
+enum class TextAlignmentChoice(val id: String, val label: String) {
+    LEFT("left", "Left"),
+    JUSTIFY("justify", "Justified");
+
+    companion object {
+        fun fromId(id: String): TextAlignmentChoice = entries.find { it.id == id } ?: LEFT
+    }
+}
+
+enum class CardStyleChoice(val id: String, val label: String) {
+    OUTLINED("outlined", "Clean Border"),
+    FLAT("flat", "Flat Minimal"),
+    ROUNDED("rounded", "Soft Rounded");
+
+    companion object {
+        fun fromId(id: String): CardStyleChoice = entries.find { it.id == id } ?: OUTLINED
+    }
+}
+
+enum class VerseNumberStyle(val id: String, val label: String) {
+    ACCENT("accent", "Accent"),
+    MUTED("muted", "Neutral Subtle"),
+    HIDDEN("hidden", "Hidden");
+
+    companion object {
+        fun fromId(id: String): VerseNumberStyle = entries.find { it.id == id } ?: ACCENT
+    }
+}
+
+enum class MarginPreset(val id: String, val label: String, val dp: Int) {
+    COMPACT("compact", "Compact", 14),
+    STANDARD("standard", "Balanced", 20),
+    BOOK("book", "Book Wide", 32);
+
+    companion object {
+        fun fromId(id: String): MarginPreset = entries.find { it.id == id } ?: STANDARD
+    }
+}
+
 enum class FontChoice(val id: String, val label: String) {
     SERIF("serif", "Serif (Book)"),
     SANS("sans", "Sans-Serif (Clean)"),
@@ -21,7 +61,9 @@ enum class FontChoice(val id: String, val label: String) {
 }
 
 enum class WidgetThemeChoice(val id: String, val label: String) {
-    AMOLED("amoled", "AMOLED True Black"),
+    AMOLED("amoled", "AMOLED Black"),
+    CLEAN_WHITE("clean_white", "Clean White"),
+    NEUTRAL_DARK("neutral_dark", "Neutral Dark"),
     PAPER("paper", "Warm Paper"),
     SEPIA("sepia", "Sepia Parchment"),
     SLATE("slate", "Slate Graphite"),
@@ -54,14 +96,21 @@ data class UserSettings(
     val preferredLightThemeId: String = "warm_paper",
     val preferredDarkThemeId: String = "amoled_black",
     val accentOverrideId: String = "default",
+    val cardStyle: CardStyleChoice = CardStyleChoice.OUTLINED,
+    val showNavLabels: Boolean = true,
+    // Typography & Reading
     val fontChoice: FontChoice = FontChoice.SERIF,
     val customFontFileName: String? = null,
     val fontSizeSp: Float = 18f,
     val lineHeightMultiplier: Float = 1.55f,
     val letterSpacingEm: Float = 0.0f,
     val verseSpacingDp: Int = 10,
+    val textContrastAlpha: Float = 1.0f,
+    val textAlignment: TextAlignmentChoice = TextAlignmentChoice.LEFT,
     val layoutMode: ReadingLayoutMode = ReadingLayoutMode.VERSE_BY_VERSE,
+    val verseNumberStyle: VerseNumberStyle = VerseNumberStyle.ACCENT,
     val showVerseNumbers: Boolean = true,
+    val marginPreset: MarginPreset = MarginPreset.STANDARD,
     val keepScreenOn: Boolean = false,
     val wideMargins: Boolean = false,
     // Widget Customization
@@ -90,6 +139,26 @@ class SettingsStore(context: Context) {
         } else {
             rawTrId
         }
+        val legacyShowVerseNums = prefs.getBoolean("show_verse_numbers", true)
+        val rawVNumStyle = prefs.getString("verse_num_style", null)
+        val vNumStyle = if (rawVNumStyle != null) {
+            VerseNumberStyle.fromId(rawVNumStyle)
+        } else if (!legacyShowVerseNums) {
+            VerseNumberStyle.HIDDEN
+        } else {
+            VerseNumberStyle.ACCENT
+        }
+
+        val legacyWide = prefs.getBoolean("wide_margins", false)
+        val rawMargin = prefs.getString("margin_preset", null)
+        val margin = if (rawMargin != null) {
+            MarginPreset.fromId(rawMargin)
+        } else if (legacyWide) {
+            MarginPreset.BOOK
+        } else {
+            MarginPreset.STANDARD
+        }
+
         return UserSettings(
             activeTranslationId = normalizedTrId,
             lastBookId = prefs.getInt("last_book_id", 19),
@@ -101,20 +170,26 @@ class SettingsStore(context: Context) {
             preferredLightThemeId = prefs.getString("preferred_light_theme", "warm_paper") ?: "warm_paper",
             preferredDarkThemeId = prefs.getString("preferred_dark_theme", "amoled_black") ?: "amoled_black",
             accentOverrideId = prefs.getString("accent_override", "default") ?: "default",
+            cardStyle = CardStyleChoice.fromId(prefs.getString("card_style", "outlined") ?: "outlined"),
+            showNavLabels = prefs.getBoolean("show_nav_labels", true),
             fontChoice = FontChoice.fromId(prefs.getString("font_choice", "serif") ?: "serif"),
             customFontFileName = prefs.getString("custom_font_file", null)?.takeIf { it.isNotBlank() },
             fontSizeSp = prefs.getFloat("font_size_sp", 18f),
             lineHeightMultiplier = prefs.getFloat("line_height", 1.55f),
             letterSpacingEm = prefs.getFloat("letter_spacing", 0.0f),
             verseSpacingDp = prefs.getInt("verse_spacing_dp", 10),
+            textContrastAlpha = prefs.getFloat("text_contrast_alpha", 1.0f).coerceIn(0.65f, 1.0f),
+            textAlignment = TextAlignmentChoice.fromId(prefs.getString("text_alignment", "left") ?: "left"),
             layoutMode = if (prefs.getString("layout_mode", "verse") == "paragraph") {
                 ReadingLayoutMode.PARAGRAPH
             } else {
                 ReadingLayoutMode.VERSE_BY_VERSE
             },
-            showVerseNumbers = prefs.getBoolean("show_verse_numbers", true),
+            verseNumberStyle = vNumStyle,
+            showVerseNumbers = vNumStyle != VerseNumberStyle.HIDDEN,
+            marginPreset = margin,
             keepScreenOn = prefs.getBoolean("keep_screen_on", false),
-            wideMargins = prefs.getBoolean("wide_margins", false),
+            wideMargins = margin == MarginPreset.BOOK,
             widgetTheme = WidgetThemeChoice.fromId(prefs.getString("widget_theme", "amoled") ?: "amoled"),
             widgetFontSize = WidgetFontSize.fromId(prefs.getString("widget_font_size", "medium") ?: "medium"),
             widgetShowStreak = prefs.getBoolean("widget_show_streak", true),
@@ -123,7 +198,11 @@ class SettingsStore(context: Context) {
     }
 
     fun update(transform: (UserSettings) -> UserSettings) {
-        val updated = transform(_state.value)
+        val raw = transform(_state.value)
+        val updated = raw.copy(
+            showVerseNumbers = raw.verseNumberStyle != VerseNumberStyle.HIDDEN,
+            wideMargins = raw.marginPreset == MarginPreset.BOOK
+        )
         _state.value = updated
         prefs.edit().apply {
             putString("active_translation", updated.activeTranslationId)
@@ -136,6 +215,8 @@ class SettingsStore(context: Context) {
             putString("preferred_light_theme", updated.preferredLightThemeId)
             putString("preferred_dark_theme", updated.preferredDarkThemeId)
             putString("accent_override", updated.accentOverrideId)
+            putString("card_style", updated.cardStyle.id)
+            putBoolean("show_nav_labels", updated.showNavLabels)
             putString("font_choice", updated.fontChoice.id)
             if (updated.customFontFileName.isNullOrBlank()) {
                 remove("custom_font_file")
@@ -146,8 +227,12 @@ class SettingsStore(context: Context) {
             putFloat("line_height", updated.lineHeightMultiplier)
             putFloat("letter_spacing", updated.letterSpacingEm)
             putInt("verse_spacing_dp", updated.verseSpacingDp)
+            putFloat("text_contrast_alpha", updated.textContrastAlpha)
+            putString("text_alignment", updated.textAlignment.id)
             putString("layout_mode", if (updated.layoutMode == ReadingLayoutMode.PARAGRAPH) "paragraph" else "verse")
+            putString("verse_num_style", updated.verseNumberStyle.id)
             putBoolean("show_verse_numbers", updated.showVerseNumbers)
+            putString("margin_preset", updated.marginPreset.id)
             putBoolean("keep_screen_on", updated.keepScreenOn)
             putBoolean("wide_margins", updated.wideMargins)
             putString("widget_theme", updated.widgetTheme.id)

@@ -62,17 +62,22 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.selah.bible.data.BookCoverage
+import com.selah.bible.data.CardStyleChoice
 import com.selah.bible.data.CustomFontEntry
 import com.selah.bible.data.CustomFontManager
 import com.selah.bible.data.FontChoice
 import com.selah.bible.data.ImportProgress
+import com.selah.bible.data.MarginPreset
 import com.selah.bible.data.ReadingLayoutMode
+import com.selah.bible.data.TextAlignmentChoice
 import com.selah.bible.data.Translation
 import com.selah.bible.data.UserSettings
+import com.selah.bible.data.VerseNumberStyle
 import com.selah.bible.data.WidgetFontSize
 import com.selah.bible.data.WidgetThemeChoice
 import com.selah.bible.ui.components.SectionLabel
@@ -480,6 +485,109 @@ fun SettingsScreen(
                         }
                     }
                 }
+
+                Spacer(Modifier.height(14.dp))
+                Text("One-Tap Neutral Presets (YouVersion Style)", color = palette.textSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(8.dp))
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Surface(
+                        onClick = {
+                            onUpdateSettings {
+                                it.copy(
+                                    followSystemTheme = false,
+                                    themeId = "clean_white",
+                                    accentOverrideId = "default",
+                                    cardStyle = CardStyleChoice.FLAT,
+                                    fontChoice = FontChoice.SANS,
+                                    customFontFileName = null,
+                                    verseNumberStyle = VerseNumberStyle.MUTED
+                                )
+                            }
+                        },
+                        shape = RoundedCornerShape(10.dp),
+                        color = palette.surfaceAlt,
+                        border = BorderStroke(1.dp, palette.border)
+                    ) {
+                        Text("Clean Light", color = palette.textPrimary, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp))
+                    }
+                    Surface(
+                        onClick = {
+                            onUpdateSettings {
+                                it.copy(
+                                    followSystemTheme = false,
+                                    themeId = "neutral_dark",
+                                    accentOverrideId = "default",
+                                    cardStyle = CardStyleChoice.FLAT,
+                                    fontChoice = FontChoice.SANS,
+                                    customFontFileName = null,
+                                    verseNumberStyle = VerseNumberStyle.MUTED
+                                )
+                            }
+                        },
+                        shape = RoundedCornerShape(10.dp),
+                        color = palette.surfaceAlt,
+                        border = BorderStroke(1.dp, palette.border)
+                    ) {
+                        Text("Neutral Dark", color = palette.textPrimary, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp))
+                    }
+                    Surface(
+                        onClick = {
+                            onUpdateSettings {
+                                it.copy(
+                                    followSystemTheme = false,
+                                    themeId = "amoled_neutral",
+                                    accentOverrideId = "default",
+                                    cardStyle = CardStyleChoice.FLAT,
+                                    fontChoice = FontChoice.SANS,
+                                    customFontFileName = null,
+                                    verseNumberStyle = VerseNumberStyle.MUTED
+                                )
+                            }
+                        },
+                        shape = RoundedCornerShape(10.dp),
+                        color = palette.surfaceAlt,
+                        border = BorderStroke(1.dp, palette.border)
+                    ) {
+                        Text("Pure Black Neutral", color = palette.textPrimary, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp))
+                    }
+                }
+
+                Spacer(Modifier.height(14.dp))
+                Text("Card & Surface Style", color = palette.textSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    CardStyleChoice.entries.forEach { cs ->
+                        val active = settings.cardStyle == cs
+                        Surface(
+                            onClick = { onUpdateSettings { it.copy(cardStyle = cs) } },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (active) palette.accent else palette.surfaceAlt,
+                            border = BorderStroke(1.dp, if (active) palette.accent else palette.border)
+                        ) {
+                            Box(Modifier.padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = cs.label,
+                                    color = if (active) palette.onAccent else palette.textPrimary,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(8.dp))
+                SettingToggleRow(
+                    title = "Show Bottom Bar Labels",
+                    subtitle = "Turn off for an ultra-minimal icon navigation bar",
+                    checked = settings.showNavLabels
+                ) { checked ->
+                    onUpdateSettings { it.copy(showNavLabels = checked) }
+                }
             }
         }
 
@@ -499,15 +607,16 @@ fun SettingsScreen(
                         .padding(14.dp)
                 ) {
                     Text(
-                        text = if (settings.showVerseNumbers) {
+                        text = if (settings.verseNumberStyle != VerseNumberStyle.HIDDEN) {
                             "10  Be still, and know that I am God: I will be exalted among the heathen, I will be exalted in the earth."
                         } else {
                             "Be still, and know that I am God: I will be exalted among the heathen, I will be exalted in the earth."
                         },
-                        color = palette.textPrimary,
+                        color = palette.textPrimary.copy(alpha = settings.textContrastAlpha),
                         fontSize = settings.fontSizeSp.sp,
                         lineHeight = (settings.fontSizeSp * settings.lineHeightMultiplier).sp,
                         letterSpacing = settings.letterSpacingEm.em,
+                        textAlign = if (settings.textAlignment == TextAlignmentChoice.JUSTIFY) TextAlign.Justify else TextAlign.Start,
                         fontFamily = previewFont
                     )
                 }
@@ -626,6 +735,90 @@ fun SettingsScreen(
                     colors = SliderDefaults.colors(thumbColor = palette.accent, activeTrackColor = palette.accent)
                 )
 
+                Text(
+                    "Text Softness / Contrast: ${(settings.textContrastAlpha * 100).toInt()}%",
+                    color = palette.textSecondary,
+                    fontSize = 12.sp
+                )
+                Slider(
+                    value = settings.textContrastAlpha,
+                    onValueChange = { v -> onUpdateSettings { it.copy(textContrastAlpha = v) } },
+                    valueRange = 0.70f..1.0f,
+                    colors = SliderDefaults.colors(thumbColor = palette.accent, activeTrackColor = palette.accent)
+                )
+
+                Text(
+                    "Verse Spacing: ${settings.verseSpacingDp}dp",
+                    color = palette.textSecondary,
+                    fontSize = 12.sp
+                )
+                Slider(
+                    value = settings.verseSpacingDp.toFloat(),
+                    onValueChange = { v -> onUpdateSettings { it.copy(verseSpacingDp = v.toInt()) } },
+                    valueRange = 4f..22f,
+                    colors = SliderDefaults.colors(thumbColor = palette.accent, activeTrackColor = palette.accent)
+                )
+
+                Text("Text Alignment", color = palette.textSecondary, fontSize = 12.sp)
+                Spacer(Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextAlignmentChoice.entries.forEach { ta ->
+                        val active = settings.textAlignment == ta
+                        Surface(
+                            onClick = { onUpdateSettings { it.copy(textAlignment = ta) } },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (active) palette.accent else palette.surfaceAlt,
+                            border = BorderStroke(1.dp, if (active) palette.accent else palette.border)
+                        ) {
+                            Box(Modifier.padding(vertical = 7.dp), contentAlignment = Alignment.Center) {
+                                Text(ta.label, color = if (active) palette.onAccent else palette.textPrimary, fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(10.dp))
+                Text("Verse Numbers", color = palette.textSecondary, fontSize = 12.sp)
+                Spacer(Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    VerseNumberStyle.entries.forEach { vns ->
+                        val active = settings.verseNumberStyle == vns
+                        Surface(
+                            onClick = { onUpdateSettings { it.copy(verseNumberStyle = vns) } },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (active) palette.accent else palette.surfaceAlt,
+                            border = BorderStroke(1.dp, if (active) palette.accent else palette.border)
+                        ) {
+                            Box(Modifier.padding(vertical = 7.dp), contentAlignment = Alignment.Center) {
+                                Text(vns.label, color = if (active) palette.onAccent else palette.textPrimary, fontSize = 11.sp)
+                            }
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(10.dp))
+                Text("Reading Margins", color = palette.textSecondary, fontSize = 12.sp)
+                Spacer(Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    MarginPreset.entries.forEach { mp ->
+                        val active = settings.marginPreset == mp
+                        Surface(
+                            onClick = { onUpdateSettings { it.copy(marginPreset = mp) } },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (active) palette.accent else palette.surfaceAlt,
+                            border = BorderStroke(1.dp, if (active) palette.accent else palette.border)
+                        ) {
+                            Box(Modifier.padding(vertical = 7.dp), contentAlignment = Alignment.Center) {
+                                Text(mp.label, color = if (active) palette.onAccent else palette.textPrimary, fontSize = 11.sp)
+                            }
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(8.dp))
                 SettingToggleRow(
                     title = "Flowing Paragraph Mode",
                     subtitle = "Book-style paragraphs vs verse-per-line",
@@ -634,22 +827,6 @@ fun SettingsScreen(
                     onUpdateSettings {
                         it.copy(layoutMode = if (checked) ReadingLayoutMode.PARAGRAPH else ReadingLayoutMode.VERSE_BY_VERSE)
                     }
-                }
-
-                SettingToggleRow(
-                    title = "Show Verse Numbers",
-                    subtitle = "Display superscript verse markers",
-                    checked = settings.showVerseNumbers
-                ) { checked ->
-                    onUpdateSettings { it.copy(showVerseNumbers = checked) }
-                }
-
-                SettingToggleRow(
-                    title = "Wide Book Margins",
-                    subtitle = "Narrower line measure for comfortable reading",
-                    checked = settings.wideMargins
-                ) { checked ->
-                    onUpdateSettings { it.copy(wideMargins = checked) }
                 }
 
                 SettingToggleRow(

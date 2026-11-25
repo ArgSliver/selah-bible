@@ -73,16 +73,20 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.BaselineShift
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.selah.bible.data.BibleCanon
 import com.selah.bible.data.BibleVerse
+import com.selah.bible.data.FontChoice
 import com.selah.bible.data.ReadingLayoutMode
 import com.selah.bible.data.Testament
+import com.selah.bible.data.TextAlignmentChoice
 import com.selah.bible.data.Translation
 import com.selah.bible.data.UserSettings
+import com.selah.bible.data.VerseNumberStyle
 import com.selah.bible.ui.theme.LocalSelahPalette
 import com.selah.bible.ui.theme.SelahThemeCatalog
 
@@ -138,7 +142,14 @@ fun ReaderScreen(
         }
     }
 
-    val horizontalPadding = if (settings.wideMargins) 28.dp else 18.dp
+    val horizontalPadding = settings.marginPreset.dp.dp
+    val scriptureColor = palette.textPrimary.copy(alpha = settings.textContrastAlpha)
+    val textAlign = if (settings.textAlignment == TextAlignmentChoice.JUSTIFY) TextAlign.Justify else TextAlign.Start
+    val verseNumColor = when (settings.verseNumberStyle) {
+        VerseNumberStyle.ACCENT -> palette.accent
+        VerseNumberStyle.MUTED -> palette.textSecondary.copy(alpha = 0.72f)
+        VerseNumberStyle.HIDDEN -> Color.Transparent
+    }
 
     Column(
         modifier = Modifier
@@ -297,12 +308,12 @@ fun ReaderScreen(
                                     highlightsInChapter[v.verse],
                                     palette.isDark
                                 )
-                                if (settings.showVerseNumbers) {
+                                if (settings.verseNumberStyle != VerseNumberStyle.HIDDEN) {
                                     withStyle(
                                         SpanStyle(
-                                            color = palette.accent,
+                                            color = verseNumColor,
                                             fontSize = (settings.fontSizeSp * 0.65f).sp,
-                                            fontWeight = FontWeight.Bold,
+                                            fontWeight = if (settings.verseNumberStyle == VerseNumberStyle.ACCENT) FontWeight.Bold else FontWeight.Medium,
                                             baselineShift = BaselineShift.Superscript
                                         )
                                     ) {
@@ -317,10 +328,11 @@ fun ReaderScreen(
                         }
                         Text(
                             text = paragraph,
-                            color = palette.textPrimary,
+                            color = scriptureColor,
                             fontSize = settings.fontSizeSp.sp,
                             lineHeight = (settings.fontSizeSp * settings.lineHeightMultiplier).sp,
                             letterSpacing = settings.letterSpacingEm.em,
+                            textAlign = textAlign,
                             fontFamily = fontFamily
                         )
                         Spacer(Modifier.height(10.dp))
@@ -353,12 +365,12 @@ fun ReaderScreen(
                                 .padding(horizontal = 6.dp, vertical = 4.dp)
                         ) {
                             val annotated = buildAnnotatedString {
-                                if (settings.showVerseNumbers) {
+                                if (settings.verseNumberStyle != VerseNumberStyle.HIDDEN) {
                                     withStyle(
                                         SpanStyle(
-                                            color = palette.accent,
+                                            color = verseNumColor,
                                             fontSize = (settings.fontSizeSp * 0.68f).sp,
-                                            fontWeight = FontWeight.Bold,
+                                            fontWeight = if (settings.verseNumberStyle == VerseNumberStyle.ACCENT) FontWeight.Bold else FontWeight.Medium,
                                             baselineShift = BaselineShift.Superscript
                                         )
                                     ) {
@@ -369,10 +381,11 @@ fun ReaderScreen(
                             }
                             Text(
                                 text = annotated,
-                                color = palette.textPrimary,
+                                color = scriptureColor,
                                 fontSize = settings.fontSizeSp.sp,
                                 lineHeight = (settings.fontSizeSp * settings.lineHeightMultiplier).sp,
                                 letterSpacing = settings.letterSpacingEm.em,
+                                textAlign = textAlign,
                                 fontFamily = fontFamily
                             )
 
@@ -579,7 +592,7 @@ fun ReaderScreen(
         }
     }
 
-    // Quick Style Bottom Sheet (Font size, theme, paragraph mode)
+    // Quick Style Bottom Sheet (YouVersion-style quick appearance controls)
     if (showQuickStyle) {
         ModalBottomSheet(
             onDismissRequest = { showQuickStyle = false },
@@ -590,10 +603,72 @@ fun ReaderScreen(
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp, vertical = 8.dp)
             ) {
-                Text("Quick Reading Style", color = palette.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Text("Reading Appearance", color = palette.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(12.dp))
 
-                Text("Font Size: ${settings.fontSizeSp.toInt()}sp", color = palette.textSecondary, fontSize = 13.sp)
+                Text("Theme", color = palette.textSecondary, fontSize = 12.sp)
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf(
+                        "clean_white", "soft_gray", "warm_paper", "sepia_parchment",
+                        "neutral_dark", "amoled_neutral", "amoled_black"
+                    ).forEach { id ->
+                        val t = SelahThemeCatalog.themes.first { it.id == id }
+                        val selected = !settings.followSystemTheme && settings.themeId == id
+                        Surface(
+                            onClick = { onUpdateSettings { it.copy(followSystemTheme = false, themeId = id) } },
+                            shape = CircleShape,
+                            color = t.background,
+                            border = BorderStroke(if (selected) 2.dp else 1.dp, if (selected) palette.accent else t.border),
+                            modifier = Modifier.size(34.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(if (selected) 12.dp else 7.dp)
+                                        .clip(CircleShape)
+                                        .background(t.accent)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(12.dp))
+                Text("Font", color = palette.textSecondary, fontSize = 12.sp)
+                Spacer(Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    listOf(FontChoice.SERIF, FontChoice.SANS, FontChoice.OPEN_DYSLEXIC).forEach { fc ->
+                        val active = settings.customFontFileName == null && settings.fontChoice == fc
+                        Surface(
+                            onClick = { onUpdateSettings { it.copy(fontChoice = fc, customFontFileName = null) } },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (active) palette.accent else palette.surfaceAlt,
+                            border = BorderStroke(1.dp, if (active) palette.accent else palette.border)
+                        ) {
+                            Box(Modifier.padding(vertical = 7.dp), contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = when (fc) {
+                                        FontChoice.SERIF -> "Serif"
+                                        FontChoice.SANS -> "Sans"
+                                        FontChoice.OPEN_DYSLEXIC -> "Dyslexic"
+                                        else -> fc.label
+                                    },
+                                    color = if (active) palette.onAccent else palette.textPrimary,
+                                    fontSize = 12.sp,
+                                    fontFamily = SelahThemeCatalog.fontFamilyFor(fc)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(12.dp))
+                Text("Font Size: ${settings.fontSizeSp.toInt()}sp", color = palette.textSecondary, fontSize = 12.sp)
                 Slider(
                     value = settings.fontSizeSp,
                     onValueChange = { v -> onUpdateSettings { it.copy(fontSizeSp = v) } },
@@ -604,12 +679,24 @@ fun ReaderScreen(
                 Text(
                     "Line Spacing: ${String.format("%.2f", settings.lineHeightMultiplier)}x",
                     color = palette.textSecondary,
-                    fontSize = 13.sp
+                    fontSize = 12.sp
                 )
                 Slider(
                     value = settings.lineHeightMultiplier,
                     onValueChange = { v -> onUpdateSettings { it.copy(lineHeightMultiplier = v) } },
                     valueRange = 1.2f..2.0f,
+                    colors = SliderDefaults.colors(thumbColor = palette.accent, activeTrackColor = palette.accent)
+                )
+
+                Text(
+                    "Text Softness: ${(settings.textContrastAlpha * 100).toInt()}%",
+                    color = palette.textSecondary,
+                    fontSize = 12.sp
+                )
+                Slider(
+                    value = settings.textContrastAlpha,
+                    onValueChange = { v -> onUpdateSettings { it.copy(textContrastAlpha = v) } },
+                    valueRange = 0.70f..1.0f,
                     colors = SliderDefaults.colors(thumbColor = palette.accent, activeTrackColor = palette.accent)
                 )
 
@@ -631,35 +718,22 @@ fun ReaderScreen(
                     )
                 }
 
-                Spacer(Modifier.height(8.dp))
-                Text("Quick Theme", color = palette.textSecondary, fontSize = 13.sp)
-                Spacer(Modifier.height(8.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    listOf("amoled_black", "warm_paper", "sepia_parchment", "midnight_oled", "forest_night").forEach { id ->
-                        val t = SelahThemeCatalog.themes.first { it.id == id }
-                        val selected = !settings.followSystemTheme && settings.themeId == id
-                        Box(
-                            modifier = Modifier
-                                .size(38.dp)
-                                .clip(CircleShape)
-                                .background(t.background)
-                                .clickable {
-                                    onUpdateSettings { it.copy(followSystemTheme = false, themeId = id) }
-                                }
-                                .padding(2.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(if (selected) 16.dp else 10.dp)
-                                    .clip(CircleShape)
-                                    .background(t.accent)
-                            )
+                    Text("Justified Book Alignment", color = palette.textPrimary, fontSize = 14.sp)
+                    Switch(
+                        checked = settings.textAlignment == TextAlignmentChoice.JUSTIFY,
+                        onCheckedChange = { checked ->
+                            onUpdateSettings {
+                                it.copy(
+                                    textAlignment = if (checked) TextAlignmentChoice.JUSTIFY else TextAlignmentChoice.LEFT
+                                )
+                            }
                         }
-                    }
+                    )
                 }
                 Spacer(Modifier.height(24.dp))
             }

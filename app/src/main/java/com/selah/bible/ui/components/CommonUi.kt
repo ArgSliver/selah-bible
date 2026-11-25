@@ -13,6 +13,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.selah.bible.data.CardStyleChoice
+import com.selah.bible.ui.theme.LocalCardStyle
 import com.selah.bible.ui.theme.LocalSelahPalette
 
 @Composable
@@ -23,22 +25,33 @@ fun SelahCard(
     content: @Composable ColumnScope.() -> Unit
 ) {
     val palette = LocalSelahPalette.current
+    val cardStyle = LocalCardStyle.current
+    val shape = when (cardStyle) {
+        CardStyleChoice.OUTLINED -> RoundedCornerShape(14.dp)
+        CardStyleChoice.FLAT -> RoundedCornerShape(12.dp)
+        CardStyleChoice.ROUNDED -> RoundedCornerShape(22.dp)
+    }
+    val border = when (cardStyle) {
+        CardStyleChoice.FLAT -> null
+        CardStyleChoice.OUTLINED, CardStyleChoice.ROUNDED -> BorderStroke(1.dp, palette.border)
+    }
+
     if (onClick != null) {
         Surface(
             onClick = onClick,
             modifier = modifier,
-            shape = RoundedCornerShape(16.dp),
+            shape = shape,
             color = palette.surface,
-            border = BorderStroke(1.dp, palette.border)
+            border = border
         ) {
             Column(modifier = Modifier.padding(padding), content = content)
         }
     } else {
         Surface(
             modifier = modifier,
-            shape = RoundedCornerShape(16.dp),
+            shape = shape,
             color = palette.surface,
-            border = BorderStroke(1.dp, palette.border)
+            border = border
         ) {
             Column(modifier = Modifier.padding(padding), content = content)
         }

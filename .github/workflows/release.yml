@@ -48,6 +48,18 @@ jobs:
             echo "SELAH_KEYSTORE_PATH=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
           fi
 
+      - name: Compute version from release tag
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          TAG="${INPUT_TAG:-${GITHUB_REF_NAME}}"
+          VER="${TAG#v}"
+          IFS='.' read -r MAJ MIN PAT <<< "$VER"
+          CODE=$(( ${MAJ:-1} * 10000 + ${MIN:-0} * 100 + ${PAT:-0} ))
+          echo "RELEASE_TAG=${TAG}" >> "$GITHUB_ENV"
+          echo "SELAH_VERSION_NAME=${VER}" >> "$GITHUB_ENV"
+          echo "SELAH_VERSION_CODE=${CODE}" >> "$GITHUB_ENV"
+
       - name: Build release APK
         env:
           SELAH_KEYSTORE_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
@@ -56,12 +68,7 @@ jobs:
         run: ./gradlew assembleRelease
 
       - name: Prepare Obtainium-friendly APK asset
-        env:
-          INPUT_TAG: ${{ github.event.inputs.tag }}
-        run: |
-          TAG="${INPUT_TAG:-${GITHUB_REF_NAME}}"
-          cp app/build/outputs/apk/release/app-release.apk "selah-bible-${TAG}.apk"
-          echo "RELEASE_TAG=${TAG}" >> "$GITHUB_ENV"
+        run: cp app/build/outputs/apk/release/app-release.apk "selah-bible-${RELEASE_TAG}.apk"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
