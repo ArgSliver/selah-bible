@@ -48,7 +48,7 @@ object EpubImporter {
         RegexOption.IGNORE_CASE
     )
     private val chapterDropCapRegex = Regex(
-        "<(?:span|div|h[1-6]|p|b|strong)\\b[^>]*class=[\"'][^\"']*(?:chap(?:ter)?(?:[-_]?(?:num|number))?|cnum|ch[-_]?num|dropcap|\\bchap\\b|\\bch\\b|\\bcn\\b|\\bc\\b)[^\"']*[\"'][^>]*>(?:<[^>]+>)*\\s*(\\d{1,3})\\s*(?:<[^>]+>)*</(?:span|div|h[1-6]|p|b|strong)>",
+        "<(?:span|div|h[1-6]|p|b|strong)\\b[^>]*class=[\"'][^\"']*(?:chap(?:ter)?(?:[-_]?(?:num|number))?|cnum|ch[-_]?num|drop[-_]?cap|\\bchap\\b|\\bch\\b|\\bcn\\b|\\bc\\b)[^\"']*[\"'][^>]*>(?:<[^>]+>)*\\s*(\\d{1,3})\\s*(?:<[^>]+>)*</(?:span|div|h[1-6]|p|b|strong)>",
         RegexOption.IGNORE_CASE
     )
     private val verseClassTagRegex = Regex(
@@ -253,10 +253,15 @@ object EpubImporter {
         s = noteRefLinkRegex.replace(s, "")
         // Convert drop-cap chapter numbers into explicit CHAPTER lines
         s = chapterDropCapRegex.replace(s) { m -> "\nCHAPTER ${m.groupValues[1]}\n" }
-        // Tag explicit h1-h3 headings with ⟦H⟧ so book/chapter titles are unmistakably identified
+        // Tag clean h1-h2 book/chapter titles with ⟦H⟧ ONLY if they don't already contain CHAPTER/verse markers
         s = headingTagRegex.replace(s) { m ->
-            val inner = allTagsRegex.replace(m.groupValues[2], " ").replace(Regex("\\s+"), " ").trim()
-            if (inner.isNotEmpty()) "\n⟦H⟧$inner\n" else "\n"
+            val rawInner = m.groupValues[2]
+            if ("CHAPTER " in rawInner || "⟦" in rawInner) {
+                "\n$rawInner\n"
+            } else {
+                val inner = allTagsRegex.replace(rawInner, " ").replace(Regex("\\s+"), " ").trim()
+                if (inner.isNotEmpty() && inner.length <= 100) "\n⟦H⟧$inner\n" else "\n$rawInner\n"
+            }
         }
         // Convert verse tags (including nested <a>/<b> inside <sup> or <span class="verse">)
         s = verseClassTagRegex.replace(s) { m -> " ⟦${m.groupValues[1]}⟧ " }

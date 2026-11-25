@@ -5,25 +5,26 @@ import com.selah.bible.data.BibleCanon
 import com.selah.bible.data.BibleVerse
 
 /**
- * Resilient, Study-Bible-aware Bible text parser supporting real-world KJV, NLT, NIV, ESV, MEV,
- * and arbitrary EPUB & PDF layouts:
- * - Prevents Study Bible book introductions & cross-reference quotes (e.g. "Judges 17:6" inside
- *   Ruth's intro, "1 Kings 4:32" inside Song of Songs' intro, "Isaiah 40:3" inside Mark's intro)
- *   from hijacking the active book!
- * - Recognizes explicit ⟦H⟧ HTML headings from EPUB <h1>/<h2>/<h3> tags
- * - Full classic KJV headers, Roman numeral chapters, inline Chapter:Verse, drop-cap implicit Verse 1
- * - Ignores NLT Song of Songs speaker labels and PDF running page headers
+ * Resilient, Study-Bible-aware Bible text parser supporting KJV, NLT, NIV, ESV, MEV,
+ * and arbitrary EPUB & PDF layouts.
+ *
+ * Key safeguards:
+ * - Never latches into a drop-all state on PDFs or EPUBs (removed brittle intro-skip latch)
+ * - Protects Book Introductions (when currentChapter == 0) from stray cross-reference quotes
+ *   of OTHER books (e.g. "Judges 17:6" in Ruth's intro, "1 Kings 4:32" in Song of Songs' intro,
+ *   "2 Kings 14:25" in Amos's intro, "Isaiah 40:3" in Mark's intro) without disabling explicit
+ *   "Book Ch:V" parsing across full files
+ * - Handles HTML headings with subtitles ("Ruth: A Story of Redemption", "Mark 1 — Jesus...")
+ * - Supports Roman numerals, inline Chapter:Verse, drop-cap implicit Verse 1, Song of Songs speakers
  */
 class BibleTextParser(private val translationId: String) {
 
     private var currentBook: BibleBook? = null
-    private var sectionLockedBook: BibleBook? = null
-    private var headingBasedMode: Boolean = false
-    private var inBookIntroduction: Boolean = false
     private var currentChapter: Int = 0
     private var currentVerse: Int = 0
     private val currentText = StringBuilder()
     private var expectingImplicitVerseOne: Boolean = false
+    private var lastLineWasExplicitRef: Boolean = false
 
     // Keyed by packed (bookId, chapter, verse)
     private val verseMap = LinkedHashMap<Long, BibleVerse>(32000)
@@ -36,11 +37,11 @@ class BibleTextParser(private val translationId: String) {
             "^([1-3]?\\s?[A-Za-z][A-Za-z .]{1,28}?)\\s+(\\d{1,3}):(\\d{1,3})(?:[-–—]\\d{1,3})?\\s+(.+)$"
         )
         private val chapterHeadingRegex = Regex(
-            "^(?:chapter|ch\\.?|psalm|ps\\.?)\\s+([0-9]{1,3}|[IVXLC]{1,8})(?:\\s*[:\\-–—.].*)?$",
+            "^(?:chapter|ch\\.?|psalm|ps\\.?)\\s+([0-9]{1,3}|[IVXLC]{1,8})(?:\\s*[:\\-–—.].*|\\s+[A-Z].*)?$",
             RegexOption.IGNORE_CASE
         )
         private val bookAndChapterRegex = Regex(
-            "^([1-3]?\\s?[A-Za-z][A-Za-z .,'’()]{1,50}?)\\s+(?:chapter\\s+)?([0-9]{1,3}|[IVXLC]{1,8})$",
+            "^([1-3]?\\s?[A-Za-z][A-Za-z .,'’()]{1,46}?)\\s+(?:chapter\\s+)?([0-9]{1,3}|[IVXLC]{1,8})(?:\\s*[:\\-–—].*)?$",
             RegexOption.IGNORE_CASE
         )
         private val runningHeaderRangeRegex = Regex(
@@ -58,11 +59,7 @@ class BibleTextParser(private val translationId: String) {
         private val standaloneNumberRegex = Regex("^(\\d{1,3})$")
         private val filenameBookChapterRegex = Regex("^([1-3]?\\s?[a-zA-Z]+(?:\\s+[a-zA-Z]+)*?)\\s*(\\d{1,3})$")
         private val crossRefPrefixRegex = Regex("^(?:see|cf\\.?|compare|also|note|notes|study note|cross-?ref)\\b", RegexOption.IGNORE_CASE)
-        private val introSectionHeaderRegex = Regex(
-            "^(?:introduction(?:\\s+to\\b.*)?|book\\s+introduction|overview|outline|blueprint|megathemes|vital\\s+statistics|author|setting|background|purpose|key\\s+verse|key\\s+people|special\\s+features|timeline)$",
-            RegexOption.IGNORE_CASE
-        )
-        // Song of Songs dramatic speaker headings in NLT/NIV/ESV/MEV
+
         private val songSpeakerLabels = setOf(
             "young woman", "young man", "young women of jerusalem", "friends",
             "king solomon", "solomon", "beloved", "lover", "daughters of jerusalem",
@@ -76,10 +73,10 @@ class BibleTextParser(private val translationId: String) {
     }
 
     /**
-     * Hint from EPUB section filename (e.g. "08_Ruth.xhtml", "22_SNG_01.xhtml", "ot30_amos.html", "41_Mark.xhtml").
+     * Soft starting hint from EPUB section filename (e.g. "08_RUT.xhtml", "22_SOL_01.xhtml", "41_Mark.xhtml").
+     * Never locks out subsequent books if an EPUB packs multiple books in one XHTML file.
      */
     fun hintSectionTitle(title: String) {
-        sectionLockedBook = null
         val base = title
             .replace(Regex("\\.(x?html?|xml|txt)$", RegexOption.IGNORE_CASE), "")
             .replace('_', ' ')
@@ -87,7 +84,6 @@ class BibleTextParser(private val translationId: String) {
             .replace(Regex("\\s+"), " ")
             .trim()
 
-        // Strip common EPUB filename prefixes like "08 ", "b08 ", "ot08 ", "nt02 ", "nlt 08 ", "ch041 "
         val candidates = listOf(
             base.replace(Regex("^(?:(?:ot|nt|bk|book|part|sec|ch|nlt|kjv|niv|esv|mev|bible)[\\s]*)*\\d{1,3}\\s+", RegexOption.IGNORE_CASE), "").trim(),
             base.replace(Regex("^(?:0\\d+|[4-9]\\d|\\d{3,})\\s+"), "").trim(),
@@ -98,15 +94,13 @@ class BibleTextParser(private val translationId: String) {
         for (cand in candidates) {
             val directBook = BibleCanon.findByName(cand)
             if (directBook != null) {
-                sectionLockedBook = directBook
-                headingBasedMode = true
-                inBookIntroduction = false
                 if (directBook.id != currentBook?.id) {
                     flushCurrentVerse()
                     currentBook = directBook
                     currentChapter = if (directBook.chapters == 1) 1 else 0
                     currentVerse = 0
                     expectingImplicitVerseOne = (directBook.chapters == 1)
+                    lastLineWasExplicitRef = false
                 }
                 return
             }
@@ -116,14 +110,12 @@ class BibleTextParser(private val translationId: String) {
                 val book = BibleCanon.findByName(m.groupValues[1])
                 val ch = m.groupValues[2].toIntOrNull()
                 if (book != null && ch != null && ch in 1..book.chapters) {
-                    sectionLockedBook = book
-                    headingBasedMode = true
-                    inBookIntroduction = false
                     flushCurrentVerse()
                     currentBook = book
                     currentChapter = ch
                     currentVerse = 0
                     expectingImplicitVerseOne = true
+                    lastLineWasExplicitRef = false
                     return
                 }
             }
@@ -166,35 +158,54 @@ class BibleTextParser(private val translationId: String) {
             return
         }
 
-        // Detect Study Bible book introduction / outline headers so outline bullets don't become fake verses
-        if ((isHtmlHeading || line.length <= 40) && introSectionHeaderRegex.matches(line) && currentChapter == 0) {
-            inBookIntroduction = true
-            return
+        // 1. Explicit "Book Chapter:Verse text" line (e.g. "Genesis 1:1 In the beginning...")
+        explicitRefRegex.matchEntire(line)?.let { m ->
+            val book = BibleCanon.findByName(m.groupValues[1])
+            val ch = m.groupValues[2].toIntOrNull()
+            val v = m.groupValues[3].toIntOrNull()
+            val body = m.groupValues[4].trim()
+            if (book != null && ch != null && v != null && ch in 1..book.chapters && v in 1..176) {
+                val cur = currentBook
+                // Guard ONLY against isolated cross-ref quotes inside a Study Bible intro (currentChapter == 0)
+                // quoting a completely different book before Chapter 1 has started!
+                val isStrayIntroQuote = cur != null && currentChapter == 0 && !lastLineWasExplicitRef &&
+                    book.id != cur.id && book.id != cur.id + 1
+                if (!isStrayIntroQuote) {
+                    flushCurrentVerse()
+                    currentBook = book
+                    currentChapter = ch
+                    currentVerse = v
+                    expectingImplicitVerseOne = false
+                    lastLineWasExplicitRef = true
+                    feedVerseSegments(body)
+                }
+                return
+            }
         }
 
-        // 1. Book heading line (up to 115 chars; handles HTML <h1>/<h2> headings and plain text book headers)
+        // 2. Book heading line (up to 115 chars; also handles HTML headings with subtitles like "Ruth: A Story...")
         if (line.length <= 115 && !line.contains('⟦')) {
-            val bookOnly = BibleCanon.findByName(line)
+            val bookOnly = BibleCanon.findByName(line) ?: if (isHtmlHeading) {
+                val beforeSub = line.substringBefore(':').substringBefore('—').substringBefore('–').trim()
+                if (beforeSub.length in 3..60) BibleCanon.findByName(beforeSub) else null
+            } else {
+                null
+            }
             if (bookOnly != null) {
-                // If already reading this exact book mid-chapter and NOT an explicit HTML heading, ignore PDF running header
+                // If already reading this exact book mid-chapter and NOT an explicit HTML heading, treat as PDF running header
                 if (!isHtmlHeading && currentBook?.id == bookOnly.id && currentChapter > 0 && currentVerse > 0) {
-                    return
-                }
-                // In Study Bible intros, an inline single-word mention of another book shouldn't hijack a section-locked book unless it's an HTML heading
-                if (!isHtmlHeading && sectionLockedBook != null && bookOnly.id != sectionLockedBook!!.id) {
                     return
                 }
                 flushCurrentVerse()
                 currentBook = bookOnly
-                headingBasedMode = true
-                inBookIntroduction = false
                 currentChapter = if (bookOnly.chapters == 1) 1 else 0
                 currentVerse = 0
                 expectingImplicitVerseOne = (bookOnly.chapters == 1)
+                lastLineWasExplicitRef = false
                 return
             }
 
-            // "Book Chapter" heading (e.g. "Ruth 1", "Song of Songs 2", "Amos 5", "Mark 1", "Psalm 23")
+            // "Book Chapter" heading (e.g. "Ruth 1", "Song of Songs 2", "Amos 5", "Mark 1 — The Beginning")
             bookAndChapterRegex.matchEntire(line)?.let { m ->
                 val book = BibleCanon.findByName(m.groupValues[1])
                 val ch = BibleCanon.parseChapterNumber(m.groupValues[2])
@@ -203,17 +214,18 @@ class BibleTextParser(private val translationId: String) {
                     if (!isHtmlHeading && currentBook?.id == book.id && currentChapter == ch && currentVerse > 0) {
                         return
                     }
-                    // Guard against Study Bible intro cross-references hijacking a locked book section
-                    if (!isHtmlHeading && sectionLockedBook != null && book.id != sectionLockedBook!!.id) {
+                    // Guard against Study Bible intro bullet lines quoting another book's chapter (e.g. "Judges 17")
+                    if (!isHtmlHeading && currentBook != null && currentChapter == 0 &&
+                        book.id != currentBook!!.id && book.id != currentBook!!.id + 1
+                    ) {
                         return
                     }
                     flushCurrentVerse()
                     currentBook = book
-                    headingBasedMode = true
-                    inBookIntroduction = false
                     currentChapter = ch
                     currentVerse = 0
                     expectingImplicitVerseOne = true
+                    lastLineWasExplicitRef = false
                     return
                 }
             }
@@ -227,28 +239,6 @@ class BibleTextParser(private val translationId: String) {
             }
         }
 
-        // 2. Explicit "Book Chapter:Verse text" line (e.g. "Genesis 1:1 In the beginning...")
-        // CRITICAL FIX: Never let an isolated cross-reference quote inside a Study Bible Book Introduction
-        // (e.g. "Judges 17:6 ..." inside Ruth's intro or "Isaiah 40:3 ..." inside Mark's intro)
-        // hijack currentBook away from a heading-based or section-locked book!
-        if (!headingBasedMode && sectionLockedBook == null) {
-            explicitRefRegex.matchEntire(line)?.let { m ->
-                val book = BibleCanon.findByName(m.groupValues[1])
-                val ch = m.groupValues[2].toIntOrNull()
-                val v = m.groupValues[3].toIntOrNull()
-                val body = m.groupValues[4].trim()
-                if (book != null && ch != null && v != null && ch in 1..book.chapters && v in 1..176) {
-                    flushCurrentVerse()
-                    currentBook = book
-                    currentChapter = ch
-                    currentVerse = v
-                    expectingImplicitVerseOne = false
-                    feedVerseSegments(body)
-                    return
-                }
-            }
-        }
-
         val activeBook = currentBook ?: return
 
         // 3. Chapter heading ("Chapter 12", "CHAPTER XII", "PSALM 46")
@@ -257,10 +247,10 @@ class BibleTextParser(private val translationId: String) {
             if (ch != null && ch in 1..activeBook.chapters) {
                 if (currentChapter == ch && currentVerse > 0) return
                 flushCurrentVerse()
-                inBookIntroduction = false
                 currentChapter = ch
                 currentVerse = 0
                 expectingImplicitVerseOne = true
+                lastLineWasExplicitRef = false
                 return
             }
         }
@@ -269,21 +259,15 @@ class BibleTextParser(private val translationId: String) {
         standaloneNumberRegex.matchEntire(line)?.let { m ->
             val num = m.groupValues[1].toIntOrNull()
             if (num != null && num in 1..activeBook.chapters) {
-                if (currentChapter == 0 || num == currentChapter + 1 || (inBookIntroduction && num == 1)) {
+                if (currentChapter == 0 || num == currentChapter + 1) {
                     flushCurrentVerse()
-                    inBookIntroduction = false
                     currentChapter = num
                     currentVerse = 0
                     expectingImplicitVerseOne = true
+                    lastLineWasExplicitRef = false
                     return
                 }
             }
-            return
-        }
-
-        // While inside a Study Bible Book Introduction (before Chapter 1 starts), ignore intro prose & outline bullets
-        // unless explicit verse markup ⟦1⟧ / ⟦2⟧ appears (meaning scripture has actually begun!)
-        if (inBookIntroduction && !line.contains('⟦')) {
             return
         }
 
@@ -293,10 +277,10 @@ class BibleTextParser(private val translationId: String) {
             val v = m.groupValues[2].toIntOrNull()
             if (ch != null && v != null && ch in 1..activeBook.chapters && v in 1..176) {
                 flushCurrentVerse()
-                inBookIntroduction = false
                 currentChapter = ch
                 currentVerse = v
                 expectingImplicitVerseOne = false
+                lastLineWasExplicitRef = false
                 return
             }
         }
@@ -313,10 +297,10 @@ class BibleTextParser(private val translationId: String) {
                         val segEnd = if (i + 1 < hits.size) hits[i + 1].range.first else line.length
                         val body = line.substring(segStart, segEnd).trim()
                         flushCurrentVerse()
-                        inBookIntroduction = false
                         currentChapter = ch
                         currentVerse = v
                         expectingImplicitVerseOne = false
+                        lastLineWasExplicitRef = false
                         appendToCurrent(body)
                     }
                 }
@@ -328,10 +312,10 @@ class BibleTextParser(private val translationId: String) {
                 val body = m.groupValues[3]
                 if (ch != null && v != null && ch in 1..activeBook.chapters && v in 1..176) {
                     flushCurrentVerse()
-                    inBookIntroduction = false
                     currentChapter = ch
                     currentVerse = v
                     expectingImplicitVerseOne = false
+                    lastLineWasExplicitRef = false
                     feedVerseSegments(body)
                     return
                 }
@@ -340,8 +324,8 @@ class BibleTextParser(private val translationId: String) {
 
         // 7. Explicit superscript/span verse markers injected by EPUB parser: ⟦1⟧ text ⟦2⟧ text
         if (line.contains('⟦')) {
-            inBookIntroduction = false
             if (currentChapter == 0) currentChapter = 1
+            lastLineWasExplicitRef = false
             feedMarkedParagraph(line)
             return
         }
@@ -362,6 +346,7 @@ class BibleTextParser(private val translationId: String) {
                 flushCurrentVerse()
                 currentVerse = v
                 expectingImplicitVerseOne = false
+                lastLineWasExplicitRef = false
                 feedVerseSegments(body)
                 return
             }
@@ -372,6 +357,7 @@ class BibleTextParser(private val translationId: String) {
             if (!isLikelySectionHeading(line) && line.length >= 14 && line.any { it.isLowerCase() }) {
                 currentVerse = 1
                 expectingImplicitVerseOne = false
+                lastLineWasExplicitRef = false
                 feedVerseSegments(line)
                 return
             }

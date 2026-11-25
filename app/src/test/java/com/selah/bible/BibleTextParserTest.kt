@@ -166,6 +166,48 @@ class BibleTextParserTest {
     }
 
     @Test
+    fun parsesPdfWithIntrosAndH2DropCapSubtitles() {
+        // 1. PDF with "Introduction" / "Outline" followed by leading verse numbers (no EPUB markers!)
+        val pdfParser = BibleTextParser("nlt")
+        pdfParser.feedText(
+            """
+            GENESIS
+            Introduction
+            Outline
+            1 In the beginning God created the heavens and the earth.
+            2 The earth was formless and empty, and darkness covered the deep waters.
+            EXODUS
+            Overview
+            1 These are the names of the sons of Israel who moved to Egypt with their father, Jacob.
+            RUTH
+            Background
+            1 In the days when the judges ruled in Israel, a severe famine came upon the land.
+            """.trimIndent()
+        )
+        val pdfVerses = pdfParser.finish()
+        assertEquals(setOf(1, 2, 8), pdfVerses.map { it.bookId }.toSet())
+        assertEquals(4, pdfVerses.size)
+
+        // 2. EPUB where <h2> wraps BOTH a drop-cap chapter number AND a subtitle
+        val html = """
+            <html><body>
+              <h1>Mark: The Gospel of the Servant</h1>
+              <h2><span class="drop-cap">1</span> John the Baptist Prepares the Way</h2>
+              <p>This is the Good News about Jesus the Messiah, the Son of God.
+              <sup>2</sup>It began just as the prophet Isaiah had written.</p>
+            </body></html>
+        """.trimIndent()
+        val epubParser = BibleTextParser("nlt")
+        epubParser.feedText(EpubImporter.htmlToStructuredText(html))
+        val epubVerses = epubParser.finish()
+        assertEquals(2, epubVerses.size)
+        assertEquals(41, epubVerses[0].bookId)
+        assertEquals(1, epubVerses[0].chapter)
+        assertEquals(1, epubVerses[0].verse)
+        assertEquals(2, epubVerses[1].verse)
+    }
+
+    @Test
     fun infersKjvAndNltMetadataFromFilenames() {
         val (id1, code1, _) = BibleTextParser.inferTranslationMeta("NLT Study Bible.epub")
         assertEquals("nlt", id1)
