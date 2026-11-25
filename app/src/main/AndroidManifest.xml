@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+        ZERO network permissions by design!
+        Selah is 100% offline: no INTERNET, no ACCESS_NETWORK_STATE, no WAKE_LOCK,
+        no background location, no telemetry.
+    -->
+
+    <application
+        android:name=".SelahApp"
+        android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Selah">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:theme="@style/Theme.Selah">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Battery-optimized Verse of the Day Home Screen Widget -->
+        <receiver
+            android:name=".widget.VotdWidgetProvider"
+            android:exported="true"
+            android:label="@string/widget_votd_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.selah.bible.ACTION_VOTD_REFRESH" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_votd_info" />
+        </receiver>
+
+        <!-- Battery-optimized Favorite Verses Home Screen Widget -->
+        <receiver
+            android:name=".widget.FavoritesWidgetProvider"
+            android:exported="true"
+            android:label="@string/widget_favorites_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.selah.bible.ACTION_FAV_NEXT" />
+                <action android:name="com.selah.bible.ACTION_FAV_PREV" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_favorites_info" />
+        </receiver>
+
+        <!-- Passive OS date/timezone rollover listener (zero polling, zero alarms) -->
+        <receiver
+            android:name=".widget.DateChangeReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.DATE_CHANGED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+            </intent-filter>
+        </receiver>
+
+    </application>
+</manifest>

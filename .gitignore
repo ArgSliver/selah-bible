@@ -1,0 +1,50 @@
+# Gradle & Build outputs
+.gradle/
+build/
+app/build/
+captures/
+.cxx/
+*.apk
+*.ap_
+*.aab
+*.dex
+*.class
+
+# Local configuration & secrets
+local.properties
+*.keystore
+*.jks
+keystore.properties
+
+# Android Studio / IntelliJ / VS Code
+.idea/
+*.iml
+.vscode/
+.navigation/
+.externalNativeBuild/
+
+# User-supplied Bible source files & generated databases
+# (Kept out of Git to avoid large binaries and copyrighted texts like NLT)
+*.epub
+*.pdf
+*.mobi
+*.azw3
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+app/src/main/assets/bibles/*.sqlite
+app/src/main/assets/bibles/*.db
+
+# Python converter artifacts
+tools/__pycache__/
+tools/.pytest_cache/
+tools/.venv/
+*.pyc
+*.pyo
+
+# OS files
+.DS_Store
+Thumbs.db

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Selah Bible</string>
+    <string name="widget_votd_label">Selah — Verse of the Day</string>
+    <string name="widget_votd_description">Battery-optimized daily coherent Bible verse with zero background polling.</string>
+    <string name="widget_favorites_label">Selah — Favorite Verses</string>
+    <string name="widget_favorites_description">Lightweight widget showcasing your favorited Bible verses offline.</string>
+</resources>
